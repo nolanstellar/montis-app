@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-autorisations-systeme"
+description = "Enables the autorisations_systeme command without any pre-configured scope."
+commands.allow = ["autorisations_systeme"]
+
+[[permission]]
+identifier = "deny-autorisations-systeme"
+description = "Denies the autorisations_systeme command without any pre-configured scope."
+commands.deny = ["autorisations_systeme"]
