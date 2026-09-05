@@ -38,4 +38,6 @@ curl -sL -o "$T/t.dmg" "https://github.com/nolanstellar/montis-app/releases/late
 xattr -w com.apple.quarantine "0083;$(printf %x $(date +%s));Safari;$(uuidgen)" "$T/t.dmg"
 spctl -a -t open --context context:primary-signature -vv "$T/t.dmg" 2>&1 | head -2
 rm -rf "$T"
+# La copie de construction de l'app n'est pas une installation : on la retire, et Spotlight n'indexe plus ce dossier (deux « Montis » sinon).
+rm -rf "$B/macos/Montis.app" "$B/dmg/Montis.app"; touch src-tauri/target/.metadata_never_index
 echo "PUBLIÉ : v$V"
