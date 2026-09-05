@@ -5,5 +5,4 @@
   <key>NSCameraUsageDescription</key><string>Montis peut lire un document que vous lui montrez.</string>
   <key>NSAppleEventsUsageDescription</key><string>Montis pilote vos applications (volume, fenêtres, impression) quand vous le lui demandez.</string>
   <key>NSScreenCaptureUsageDescription</key><string>Montis prend une capture d'écran quand vous le lui demandez.</string>
-  <key>LSUIElement</key><true/>
 </dict></plist>

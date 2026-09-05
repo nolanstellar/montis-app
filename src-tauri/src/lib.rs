@@ -42,6 +42,20 @@ fn identifiant_neuf() -> String {
 }
 pub struct Etat(pub Mutex<Reglages>);
 
+/// JOURNAL DE LA COQUE : chaque étape (démarrage, fenêtre, raccourci, clics, erreurs) dans <config>/journal.log, consultable
+/// depuis le menu de l'icône. Une coque sans console doit pouvoir dire ce qu'elle a fait.
+pub fn journaliser(app: &AppHandle, message: &str) {
+    let d = app.path().app_config_dir().unwrap_or_else(|_| std::env::temp_dir());
+    let _ = std::fs::create_dir_all(&d);
+    let f = d.join("journal.log");
+    if let Ok(m) = std::fs::metadata(&f) { if m.len() > 512 * 1024 { let _ = std::fs::rename(&f, d.join("journal.ancien.log")); } }
+    let ligne = format!("{} {}\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), message);
+    use std::io::Write;
+    if let Ok(mut fic) = std::fs::OpenOptions::new().create(true).append(true).open(&f) { let _ = fic.write_all(ligne.as_bytes()); }
+    eprintln!("[montis] {message}");
+}
+fn fichier_journal(app: &AppHandle) -> std::path::PathBuf { app.path().app_config_dir().unwrap_or_else(|_| std::env::temp_dir()).join("journal.log") }
+
 fn fichier_reglages(app: &AppHandle) -> std::path::PathBuf {
     let d = app.path().app_config_dir().unwrap_or_else(|_| std::env::temp_dir());
     let _ = std::fs::create_dir_all(&d);
@@ -98,29 +112,36 @@ fn plateforme() -> String { std::env::consts::OS.to_string() }
 #[tauri::command]
 fn montrer(app: AppHandle) { montrer_fenetre(&app, false) }
 #[tauri::command]
-fn masquer(app: AppHandle) { if let Some(w) = app.get_webview_window("main") { let _ = w.hide(); } }
+fn masquer(app: AppHandle) { if let Some(w) = app.get_webview_window("main") { let _ = w.minimize(); } }
 
 fn montrer_fenetre(app: &AppHandle, compacte: bool) {
-    if let Some(w) = app.get_webview_window("main") {
-        if compacte {
-            let _ = w.set_size(tauri::LogicalSize::new(440.0, 640.0));
-            // Près du curseur, sans sortir de l'écran.
-            if let (Ok(pos), Ok(Some(mon))) = (w.cursor_position(), w.current_monitor()) {
-                let taille = mon.size(); let ech = mon.scale_factor();
-                let x = (pos.x - 220.0 * ech).max(mon.position().x as f64).min((mon.position().x + taille.width as i32) as f64 - 460.0 * ech);
-                let y = (pos.y + 20.0 * ech).min((mon.position().y + taille.height as i32) as f64 - 680.0 * ech);
-                let _ = w.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
+    let Some(w) = app.get_webview_window("main") else { journaliser(app, "montrer : fenêtre « main » introuvable"); return; };
+    if compacte {
+        if let Err(e) = w.set_size(tauri::LogicalSize::new(440.0, 640.0)) { journaliser(app, &format!("montrer : taille refusée : {e}")); }
+        // Près du curseur, sans sortir de l'écran ; si l'écran est inconnu, on centre.
+        match (w.cursor_position(), w.current_monitor().ok().flatten().or_else(|| w.primary_monitor().ok().flatten())) {
+            (Ok(pos), Some(mon)) => {
+                let taille = mon.size(); let ech = mon.scale_factor(); let (mx, my) = (mon.position().x as f64, mon.position().y as f64);
+                let x = (pos.x - 220.0 * ech).max(mx).min(mx + taille.width as f64 - 460.0 * ech);
+                let y = (pos.y + 20.0 * ech).max(my).min(my + taille.height as f64 - 680.0 * ech).max(my);
+                if let Err(e) = w.set_position(tauri::PhysicalPosition::new(x as i32, y as i32)) { journaliser(app, &format!("montrer : position refusée : {e}")); }
+                journaliser(app, &format!("montrer compacte : curseur ({:.0},{:.0}) écran {}x{} @{ech} → position ({:.0},{:.0})", pos.x, pos.y, taille.width, taille.height, x, y));
             }
-            let _ = w.set_always_on_top(true);
-        } else {
-            let _ = w.set_size(tauri::LogicalSize::new(1180.0, 800.0));
-            let _ = w.center();
-            let _ = w.set_always_on_top(false);
+            _ => { let _ = w.center(); journaliser(app, "montrer compacte : écran ou curseur inconnu → centrée"); }
         }
-        let _ = w.show();
-        let _ = w.set_focus();
-        let _ = w.emit("montis://appel", serde_json::json!({ "compacte": compacte }));
+        let _ = w.set_always_on_top(true);
+    } else {
+        let _ = w.set_size(tauri::LogicalSize::new(1180.0, 800.0));
+        let _ = w.center();
+        let _ = w.set_always_on_top(false);
     }
+    if let Err(e) = w.show() { journaliser(app, &format!("montrer : show refusé : {e}")); }
+    if let Err(e) = w.unminimize() { journaliser(app, &format!("montrer : unminimize : {e}")); }
+    if let Err(e) = w.set_focus() { journaliser(app, &format!("montrer : focus refusé : {e}")); }
+    // Application d'arrière-plan (sans Dock) : macOS ne la met pas devant sans activation explicite.
+    #[cfg(target_os = "macos")] { let a = app.clone(); let w2 = w.clone(); let _ = app.run_on_main_thread(move || { let _ = a.set_activation_policy(tauri::ActivationPolicy::Regular); let _ = w2.set_focus(); }); }
+    let _ = w.emit("montis://appel", serde_json::json!({ "compacte": compacte }));
+    journaliser(app, &format!("montrer {} : visible={:?} taille={:?} position={:?}", if compacte { "compacte" } else { "complète" }, w.is_visible(), w.outer_size().map(|s| (s.width, s.height)), w.outer_position().map(|p| (p.x, p.y))));
 }
 
 fn poser_raccourci(app: &AppHandle, texte: &str) -> Result<(), String> {
@@ -131,18 +152,34 @@ fn poser_raccourci(app: &AppHandle, texte: &str) -> Result<(), String> {
         .on_shortcut(texte, move |_app, _sc, ev| {
             if ev.state() == ShortcutState::Pressed {
                 let compacte = lire_reglages(&app2).compacte;
-                match app2.get_webview_window("main") {
-                    Some(w) if w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false) => { let _ = w.hide(); }
-                    _ => montrer_fenetre(&app2, compacte),
-                }
+                journaliser(&app2, "raccourci");
+                montrer_fenetre(&app2, compacte);
             }
         })
         .map_err(|e| e.to_string())
 }
 
+/// Cherche, télécharge et installe une mise à jour publiée ; redémarre l'application. Tout est journalisé.
+async fn verifier_mise_a_jour(app: &AppHandle) {
+    use tauri_plugin_updater::UpdaterExt;
+    let u = match app.updater() { Ok(u) => u, Err(e) => { journaliser(app, &format!("mise à jour : updater indisponible : {e}")); return; } };
+    match u.check().await {
+        Ok(Some(maj)) => {
+            journaliser(app, &format!("mise à jour disponible : {} → {}", env!("CARGO_PKG_VERSION"), maj.version));
+            let _ = app.emit("montis://maj", serde_json::json!({ "version": maj.version }));
+            match maj.download_and_install(|_, _| {}, || {}).await {
+                Ok(()) => { journaliser(app, "mise à jour installée → redémarrage"); app.restart(); }
+                Err(e) => journaliser(app, &format!("mise à jour : échec : {e}")),
+            }
+        }
+        Ok(None) => journaliser(app, &format!("mise à jour : v{} est la dernière", env!("CARGO_PKG_VERSION"))),
+        Err(e) => journaliser(app, &format!("mise à jour : vérification impossible : {e}")),
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| { montrer_fenetre(app, false); }))
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| { journaliser(app, "seconde instance → on montre la fenêtre"); montrer_fenetre(app, false); }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
@@ -162,25 +199,40 @@ pub fn run() {
         ])
         .setup(|app| {
             let handle = app.handle().clone();
+            let premier_lancement = !fichier_reglages(&handle).exists();
             let r = lire_reglages(&handle);
+            journaliser(&handle, &format!("démarrage v{} · {} · cœur {} · raccourci {} · appareil {}{}", env!("CARGO_PKG_VERSION"), std::env::consts::OS, r.adresse_coeur, r.raccourci, r.appareil, if premier_lancement { " · PREMIER LANCEMENT" } else { "" }));
             *app.state::<Etat>().0.lock().unwrap() = r.clone();
             // Le pont natif : abonné au flux du cœur, il exécute les actions même fenêtre cachée.
             { let p = app.state::<pont::EtatPont>().0.clone(); if let Ok(mut l) = p.lock() { l.coeur = r.adresse_coeur.clone(); l.appareil = r.appareil.clone(); } pont::demarrer(handle.clone(), p); }
             // La fenêtre principale charge l'interface du cœur (mise à jour sans republier l'application).
             let url: tauri::Url = r.adresse_coeur.parse().unwrap_or_else(|_| "https://montis.agency-stellar.fr".parse().unwrap());
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url)).title("Montis").inner_size(1180.0, 800.0).min_inner_size(380.0, 520.0).center().visible(false).build()?;
-            // La fenêtre se cache au lieu de se fermer : Montis reste dans la barre.
-            if let Some(w) = app.get_webview_window("main") {
-                let w2 = w.clone();
-                w.on_window_event(move |e| { if let tauri::WindowEvent::CloseRequested { api, .. } = e { api.prevent_close(); let _ = w2.hide(); } });
+            match WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.clone())).title("Montis").inner_size(1180.0, 800.0).min_inner_size(380.0, 520.0).center().visible(true)
+                .on_navigation({ let h = handle.clone(); move |u| { journaliser(&h, &format!("navigation → {u}")); true } })
+                .on_page_load({ let h = handle.clone(); move |_w, p| { journaliser(&h, &format!("page {:?} : {}", p.event(), p.url())); } })
+                .build() {
+                Ok(_) => journaliser(&handle, &format!("fenêtre créée sur {url}")),
+                Err(e) => { journaliser(&handle, &format!("ERREUR création de la fenêtre : {e}")); return Err(e.into()); }
             }
+            // Fermer la fenêtre = fermer Montis (règle : l'interface est toujours visible tant que l'application tourne).
+            if let Some(w) = app.get_webview_window("main") {
+                let h3 = handle.clone();
+                w.on_window_event(move |e| { if let tauri::WindowEvent::CloseRequested { .. } = e { journaliser(&h3, "fenêtre fermée → Montis se ferme"); h3.exit(0); } });
+            }
+            // MISE À JOUR AUTOMATIQUE : au démarrage puis toutes les six heures ; téléchargée, installée, redémarrage.
+            { let h4 = handle.clone(); tauri::async_runtime::spawn(async move { loop {
+                tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+                verifier_mise_a_jour(&h4).await;
+                tokio::time::sleep(std::time::Duration::from_secs(6 * 3600)).await;
+            } }); }
             // Barre des menus / zone de notification.
             let ouvrir = MenuItem::with_id(app, "ouvrir", "Ouvrir Montis", true, None::<&str>)?;
             let compacte = MenuItem::with_id(app, "compacte", "Appeler (fenêtre compacte)", true, None::<&str>)?;
             let reglages_item = MenuItem::with_id(app, "reglages", "Réglages de l'application…", true, None::<&str>)?;
+            let journal_item = MenuItem::with_id(app, "journal", "Journal de la coque…", true, None::<&str>)?;
             let maj = MenuItem::with_id(app, "maj", "Rechercher une mise à jour", true, None::<&str>)?;
             let quitter = MenuItem::with_id(app, "quitter", "Quitter Montis", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&ouvrir, &compacte, &PredefinedMenuItem::separator(app)?, &reglages_item, &maj, &PredefinedMenuItem::separator(app)?, &quitter])?;
+            let menu = Menu::with_items(app, &[&ouvrir, &compacte, &PredefinedMenuItem::separator(app)?, &reglages_item, &journal_item, &maj, &PredefinedMenuItem::separator(app)?, &quitter])?;
             let h = handle.clone();
             TrayIconBuilder::with_id("montis")
                 .icon(app.default_window_icon().unwrap().clone())
@@ -189,22 +241,27 @@ pub fn run() {
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(move |app, ev| match ev.id().as_ref() {
-                    "ouvrir" => montrer_fenetre(app, false),
+                    "journal" => { let f = fichier_journal(app); journaliser(app, "journal ouvert"); let _ = std::process::Command::new(if cfg!(target_os = "macos") { "open" } else { "notepad" }).arg(&f).spawn(); }
+                    "ouvrir" => { journaliser(app, "menu : ouvrir"); montrer_fenetre(app, false) }
                     "compacte" => montrer_fenetre(app, true),
                     "reglages" => { montrer_fenetre(app, false); let _ = app.emit("montis://reglages", ()); }
-                    "maj" => { let _ = app.emit("montis://verifier-maj", ()); montrer_fenetre(app, false); }
+                    "maj" => { let h5 = app.clone(); tauri::async_runtime::spawn(async move { verifier_mise_a_jour(&h5).await; }); montrer_fenetre(app, false); }
                     "quitter" => app.exit(0),
                     _ => {}
                 })
                 .on_tray_icon_event(move |_tray, ev| {
                     if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = ev {
+                        journaliser(&h, "clic sur l'icône");
                         let compacte = lire_reglages(&h).compacte;
                         montrer_fenetre(&h, compacte);
                     }
                 })
                 .build(app)?;
+            journaliser(&handle, "icône posée dans la barre");
             // Raccourci global.
-            if let Err(e) = poser_raccourci(&handle, &r.raccourci) { eprintln!("[montis] raccourci : {e}"); }
+            match poser_raccourci(&handle, &r.raccourci) { Ok(()) => journaliser(&handle, &format!("raccourci {} enregistré", r.raccourci)), Err(e) => journaliser(&handle, &format!("ERREUR raccourci : {e}")) }
+            // Premier lancement : la fenêtre s'affiche d'elle-même, complète, pour l'accueil.
+            if premier_lancement { let h2 = handle.clone(); std::thread::spawn(move || { std::thread::sleep(std::time::Duration::from_millis(800)); montrer_fenetre(&h2, false); }); }
             // Démarrage automatique avec la session.
             use tauri_plugin_autostart::ManagerExt;
             let _ = app.autolaunch().enable();

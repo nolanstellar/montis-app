@@ -1,6 +1,6 @@
 [package]
 name = "montis"
-version = "0.1.1"
+version = "0.1.2"
 description = "Montis — l'assistant Stellar sur le poste de travail"
 authors = ["Stellar Agency"]
 edition = "2021"
@@ -31,6 +31,7 @@ xcap = "0.4"
 dirs = "6"
 pdf-extract = "0.9"
 chrono = "0.4"
+tokio = { version = "1", features = ["time"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 
 [profile.release]
