@@ -47,3 +47,29 @@ Fichiers (chercher, ouvrir, lire, créer, renommer, déplacer), applications (la
 presse-papiers, volume, luminosité (Windows), veille, verrouillage, impression, informations système, fenêtres
 (gauche, droite, plein écran, réduire, déplacer), notifications. Tout le reste — mémoire, agenda, mails, décisions —
 appartient au cœur.
+
+## Télécharger (adresses stables, dernière version)
+
+- Mac (puce Apple et Intel, un seul fichier, signé et notarisé) : https://github.com/nolanstellar/montis-app/releases/latest/download/Montis-Mac.dmg
+- Windows : https://github.com/nolanstellar/montis-app/releases/latest/download/Montis-Windows-setup.exe
+
+## Publier une version
+
+1. `npm version <x.y.z>` (met à jour package.json ; reporter la version dans `src-tauri/tauri.conf.json` et `src-tauri/Cargo.toml`), commit, `git tag vx.y.z`, `git push --tags` : la chaîne GitHub construit Windows et Linux, crée la publication, dépose `latest.json` et `Montis-Windows-setup.exe`.
+2. **Mac, sur le Mac de l'éditeur** (certificat Developer ID et clé d'API dans le trousseau / `~/Montis/licences`) :
+   ```bash
+   set -a; source ~/Montis/licences/apple-notarisation.env; set +a
+   export TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/montis.key)" TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
+   npx tauri build --target universal-apple-darwin --config src-tauri/tauri.macos-local.conf.json
+   ```
+   L'application est signée, notarisée et agrafée par la construction. Puis signer, notariser et agrafer le .dmg, et déposer :
+   ```bash
+   B=src-tauri/target/universal-apple-darwin/release/bundle
+   codesign --force --sign "Developer ID Application: Nolan Viel (NK8ZTP3KWS)" --timestamp $B/dmg/Montis_<v>_universal.dmg
+   xcrun notarytool submit $B/dmg/Montis_<v>_universal.dmg --key ~/Montis/licences/AuthKey_3PHYJH735H.p8 --key-id 3PHYJH735H --issuer aba0c4de-2473-46df-bbe5-5bd4aaca41ca --wait
+   xcrun stapler staple $B/dmg/Montis_<v>_universal.dmg
+   cp $B/dmg/Montis_<v>_universal.dmg $B/dmg/Montis-Mac.dmg
+   gh release upload v<v> $B/dmg/Montis_<v>_universal.dmg $B/dmg/Montis-Mac.dmg $B/macos/Montis.app.tar.gz $B/macos/Montis.app.tar.gz.sig --clobber
+   ```
+   Enfin compléter `latest.json` de la publication avec les entrées `darwin-universal`, `darwin-aarch64`, `darwin-x86_64` (url du `Montis.app.tar.gz`, signature du `.sig`) et le redéposer.
+3. Vérification : télécharger `Montis-Mac.dmg` depuis l'adresse stable, poser la quarantaine (`xattr -w com.apple.quarantine "0083;…;Safari;…"`), `spctl -a -t open --context context:primary-signature -vv` sur le .dmg et `spctl -a -vv -t exec` sur l'app montée : « accepted, source=Notarized Developer ID ».
