@@ -18,7 +18,8 @@
   <h1>Ce que Montis a le droit de faire sur cet ordinateur</h1>
   <p class="intro">Chaque ligne dit à quoi sert l'autorisation. « Autoriser » ouvre la vraie demande du système ; une fois accordée, elle ne sera plus jamais redemandée. Tu peux passer et revenir plus tard par l'icône Montis › Autorisations.</p>
   <ul id="liste"></ul>
-  <div class="bas"><span class="aide" id="aide"></span><div class="droite"><button id="tout">Tout autoriser</button><button class="plein" id="continuer">Continuer vers Montis</button></div></div>
+  <p class="aide" style="margin-top:14px">Accessibilité et Enregistrement d'écran : macOS ne les applique qu'après un redémarrage de Montis. Une fois cochées dans Réglages Système, clique « Relancer Montis ».</p>
+<div class="bas"><span class="aide" id="aide"></span><div class="droite"><button id="relancer">Relancer Montis</button><button id="tout">Tout autoriser</button><button class="plein" id="continuer">Continuer vers Montis</button></div></div>
 </main>
 <script>
 const inv = (c, a) => window.__TAURI__.core.invoke(c, a || {});
@@ -38,11 +39,14 @@ async function rendre() {
   ul.querySelectorAll("button[data-reglage]").forEach((b) => b.onclick = () => inv("ouvrir_reglage", { url: b.dataset.reglage }));
 }
 async function demander(id) {
-  if (id === "micro") { try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach((t) => t.stop()); } catch (e) { alert("Micro refusé : " + e.message + ". Réglages Système › Confidentialité › Microphone › Montis."); } }
+  if (id === "micro") { try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach((t) => t.stop()); await inv("demander_autorisation", { id }); } catch (e) { alert("Micro refusé : " + e.message + ". Réglages Système › Confidentialité › Microphone › Montis."); } }
   else { try { await inv("demander_autorisation", { id }); } catch (e) { alert(String(e)); } }
   await new Promise((r) => setTimeout(r, 600)); await rendre();
 }
 document.getElementById("tout").onclick = async () => { for (const a of lignes) if (a.etat !== "accordee") await demander(a.id); };
 document.getElementById("continuer").onclick = () => inv("terminer_autorisations");
+document.getElementById("relancer").onclick = () => inv("relancer");
 rendre();
+// L'état se relit toutes les deux secondes : ce qu'on coche dans Réglages Système apparaît sans clic.
+setInterval(rendre, 2000);
 </script></body></html>

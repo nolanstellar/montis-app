@@ -5,7 +5,7 @@
 
 use serde::Serialize;
 use std::process::Command;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_plugin_notification::NotificationExt;
 
 #[derive(Serialize, Clone)]
@@ -55,8 +55,20 @@ fn reglage(pane: &str) -> Option<String> {
     if cfg!(target_os = "macos") { Some(format!("x-apple.systempreferences:com.apple.preference.security?{pane}")) } else { None }
 }
 
+fn fichier_accordees(app: &AppHandle) -> std::path::PathBuf { app.path().app_config_dir().unwrap_or_else(|_| std::env::temp_dir()).join("autorisations.json") }
+fn accordees(app: &AppHandle) -> Vec<String> { std::fs::read_to_string(fichier_accordees(app)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default() }
+fn retenir(app: &AppHandle, id: &str) { let mut v = accordees(app); if !v.iter().any(|x| x == id) { v.push(id.to_string()); let _ = std::fs::write(fichier_accordees(app), serde_json::to_string(&v).unwrap_or_default()); } }
+
 #[tauri::command]
-pub fn etat_autorisations() -> Vec<Autorisation> {
+pub fn etat_autorisations(app: AppHandle) -> Vec<Autorisation> {
+    let deja = accordees(&app);
+    let mut liste = etat_brut();
+    // Ce que le système ne dit pas sans demander (automatisation, micro, notifications, dossiers) : on garde ce que la personne a accordé.
+    for a in liste.iter_mut() { if a.etat == "inconnue" && deja.iter().any(|d| d == &a.id) { a.etat = "accordee".into(); } }
+    liste
+}
+
+fn etat_brut() -> Vec<Autorisation> {
     let a = |id: &str, titre: &str, pourquoi: &str, etat: &str, pane: Option<&str>| Autorisation { id: id.into(), titre: titre.into(), pourquoi: pourquoi.into(), etat: etat.into(), reglage: pane.and_then(reglage) };
     #[cfg(target_os = "macos")] {
         return vec![
@@ -82,7 +94,12 @@ pub fn etat_autorisations() -> Vec<Autorisation> {
 /// Déclenche la vraie demande du système pour cette autorisation (boîte de dialogue macOS), ou ouvre le bon panneau.
 #[tauri::command]
 pub fn demander_autorisation(app: AppHandle, id: String) -> Result<String, String> {
-    match id.as_str() {
+    let r = demander(app.clone(), &id)?;
+    if r == "accordee" || r == "page" { retenir(&app, &id); }
+    Ok(r)
+}
+fn demander(app: AppHandle, id: &str) -> Result<String, String> {
+    match id {
         #[cfg(target_os = "macos")]
         "accessibilite" => { let ok = mac::demander_accessibilite(); if !ok { let _ = Command::new("open").arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility").spawn(); } Ok(if ok { "accordee".into() } else { "a_accorder".into() }) }
         #[cfg(target_os = "macos")]
@@ -102,7 +119,7 @@ pub fn demander_autorisation(app: AppHandle, id: String) -> Result<String, Strin
             Ok(if ok { "accordee".into() } else { "a_accorder".into() })
         }
         "notifications" => { app.notification().builder().title("Montis").body("Les notifications fonctionnent. Je te préviendrai ici.").show().map_err(|e| e.to_string())?; Ok("accordee".into()) }
-        "micro" => Ok("page".into()),   // demandé par la page (getUserMedia) : c'est le navigateur système qui affiche la demande
+        "micro" => Ok("page".into()),   // demandé par la page (getUserMedia) : c'est le navigateur système qui affiche la demande ; retenu comme accordé si la page réussit
         _ => Ok("inconnue".into()),
     }
 }

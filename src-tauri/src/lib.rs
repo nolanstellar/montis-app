@@ -110,6 +110,10 @@ fn ouvrir_autorisations(app: &AppHandle) {
     montrer_fenetre(app, false);
 }
 
+/// Redémarre Montis (après avoir coché une autorisation que macOS n'applique qu'au relancement).
+#[tauri::command]
+fn relancer(app: AppHandle) { journaliser(&app, "relance demandée depuis l'écran des autorisations"); app.restart(); }
+
 /// L'identifiant de cet appareil : l'écran l'utilise pour que le cœur adresse ses actions au bon poste.
 #[tauri::command]
 fn identifiant(app: AppHandle) -> String { lire_reglages(&app).appareil }
@@ -214,7 +218,7 @@ pub fn run() {
         .manage(Etat(Mutex::new(Reglages::default())))
         .manage(pont::EtatPont(std::sync::Arc::new(Mutex::new(pont::Liaison::default()))))
         .invoke_handler(tauri::generate_handler![
-            reglages, enregistrer_reglages, version_coque, plateforme, montrer, masquer, identifiant, poser_jeton, terminer_autorisations,
+            reglages, enregistrer_reglages, version_coque, plateforme, montrer, masquer, identifiant, poser_jeton, terminer_autorisations, relancer,
             autorisations::etat_autorisations, autorisations::demander_autorisation, autorisations::ouvrir_reglage,
             poste::ouvrir_cible, poste::capture_ecran, poste::presse_papiers_lire, poste::presse_papiers_ecrire,
             poste::regler_volume, poste::regler_luminosite, poste::verrouiller, poste::mettre_en_veille, poste::imprimer,

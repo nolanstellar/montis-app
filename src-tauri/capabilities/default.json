@@ -71,6 +71,7 @@
     "allow-terminer-autorisations",
     "allow-etat-autorisations",
     "allow-demander-autorisation",
-    "allow-ouvrir-reglage"
+    "allow-ouvrir-reglage",
+    "allow-relancer"
   ]
 }

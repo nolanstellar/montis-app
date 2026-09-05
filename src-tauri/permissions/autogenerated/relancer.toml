@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-relancer"
+description = "Enables the relancer command without any pre-configured scope."
+commands.allow = ["relancer"]
+
+[[permission]]
+identifier = "deny-relancer"
+description = "Denies the relancer command without any pre-configured scope."
+commands.deny = ["relancer"]
