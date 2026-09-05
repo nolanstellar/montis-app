@@ -1,0 +1,48 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Montis — Autorisations</title>
+<style>
+  :root{--void:#050505;--star:#f5f3ef;--muted:#8b8b96;--accent:#4c6fff;--panel:#101018;--edge:rgba(245,243,239,.09);--ok:#2dd4bf;--warn:#f59e0b}
+  *{box-sizing:border-box} body{margin:0;background:var(--void);color:var(--star);font:15px/1.5 system-ui,-apple-system,Inter,sans-serif}
+  main{max-width:720px;margin:0 auto;padding:28px 20px 40px}
+  h1{font-size:24px;margin:0 0 6px;letter-spacing:-.02em} p.intro{color:var(--muted);margin:0 0 18px;line-height:1.5}
+  ul{list-style:none;padding:0;margin:0;display:grid;gap:10px}
+  li{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:12px 14px;border:1px solid var(--edge);border-radius:14px;background:var(--panel)}
+  b{display:block;font-size:15px} span{display:block;font-size:13px;color:var(--muted);line-height:1.45}
+  .etat{font-size:12px;letter-spacing:.06em;text-transform:uppercase;padding:3px 9px;border-radius:999px;border:1px solid var(--edge);white-space:nowrap}
+  .etat.ok{color:var(--ok);border-color:rgba(45,212,191,.35)} .etat.warn{color:var(--warn);border-color:rgba(245,158,11,.35)}
+  button{font:inherit;padding:8px 14px;border-radius:10px;border:1px solid var(--edge);background:#0b0b12;color:var(--star);cursor:pointer;white-space:nowrap}
+  button.plein{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;padding:12px 18px}
+  .droite{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+  .bas{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:22px;flex-wrap:wrap} .aide{font-size:13px;color:var(--muted)}
+</style></head>
+<body><main>
+  <h1>Ce que Montis a le droit de faire sur cet ordinateur</h1>
+  <p class="intro">Chaque ligne dit à quoi sert l'autorisation. « Autoriser » ouvre la vraie demande du système ; une fois accordée, elle ne sera plus jamais redemandée. Tu peux passer et revenir plus tard par l'icône Montis › Autorisations.</p>
+  <ul id="liste"></ul>
+  <div class="bas"><span class="aide" id="aide"></span><div class="droite"><button id="tout">Tout autoriser</button><button class="plein" id="continuer">Continuer vers Montis</button></div></div>
+</main>
+<script>
+const inv = (c, a) => window.__TAURI__.core.invoke(c, a || {});
+const LIB = { accordee: ["ok", "accordée"], a_accorder: ["warn", "à accorder"], inconnue: ["", "à demander"], sans_objet: ["", "sans objet"], page: ["", "demande en cours"] };
+let lignes = [];
+async function rendre() {
+  lignes = await inv("etat_autorisations");
+  const ul = document.getElementById("liste"); ul.innerHTML = "";
+  for (const a of lignes) {
+    const li = document.createElement("li"); const [cl, txt] = LIB[a.etat.split(" :")[0]] || ["", a.etat];
+    li.innerHTML = `<div><b></b><span></span></div><div class="droite"><span class="etat ${cl}">${txt}</span>${a.etat === "accordee" ? "" : `<button data-id="${a.id}">Autoriser</button>`}${a.reglage && a.etat !== "accordee" ? `<button data-reglage="${a.reglage}" title="Ouvrir les Réglages Système">Réglages…</button>` : ""}</div>`;
+    li.querySelector("b").textContent = a.titre; li.querySelector("span").textContent = a.pourquoi;
+    ul.appendChild(li);
+  }
+  document.getElementById("aide").textContent = `${lignes.filter((a) => a.etat === "accordee").length} sur ${lignes.length} accordée(s)`;
+  ul.querySelectorAll("button[data-id]").forEach((b) => b.onclick = () => demander(b.dataset.id));
+  ul.querySelectorAll("button[data-reglage]").forEach((b) => b.onclick = () => inv("ouvrir_reglage", { url: b.dataset.reglage }));
+}
+async function demander(id) {
+  if (id === "micro") { try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach((t) => t.stop()); } catch (e) { alert("Micro refusé : " + e.message + ". Réglages Système › Confidentialité › Microphone › Montis."); } }
+  else { try { await inv("demander_autorisation", { id }); } catch (e) { alert(String(e)); } }
+  await new Promise((r) => setTimeout(r, 600)); await rendre();
+}
+document.getElementById("tout").onclick = async () => { for (const a of lignes) if (a.etat !== "accordee") await demander(a.id); };
+document.getElementById("continuer").onclick = () => inv("terminer_autorisations");
+rendre();
+</script></body></html>

@@ -9,6 +9,7 @@
 
 mod poste;
 mod pont;
+mod autorisations;
 
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
@@ -28,10 +29,13 @@ pub struct Reglages {
     /// Identifiant stable de cet appareil auprès du cœur (créé une fois).
     #[serde(default)]
     pub appareil: String,
+    /// L'écran des autorisations a été passé une fois.
+    #[serde(default)]
+    pub autorisations_faites: bool,
 }
 impl Default for Reglages {
     fn default() -> Self {
-        Self { adresse_coeur: "https://montis.agency-stellar.fr".into(), raccourci: if cfg!(target_os = "macos") { "Alt+Space".into() } else { "Ctrl+Space".into() }, compacte: true, appareil: String::new() }
+        Self { adresse_coeur: "https://montis.agency-stellar.fr".into(), raccourci: if cfg!(target_os = "macos") { "Alt+Space".into() } else { "Ctrl+Space".into() }, compacte: true, appareil: String::new(), autorisations_faites: false }
     }
 }
 fn identifiant_neuf() -> String {
@@ -87,6 +91,20 @@ fn enregistrer_reglages(app: AppHandle, etat: tauri::State<Etat>, r: Reglages) -
         if let Ok(mut l) = app.state::<pont::EtatPont>().0.lock() { l.coeur = r.adresse_coeur.clone(); l.jeton.clear(); }
     }
     Ok(())
+}
+
+/// L'écran des autorisations est passé : on le retient et la fenêtre charge le cœur.
+#[tauri::command]
+fn terminer_autorisations(app: AppHandle) -> Result<(), String> {
+    let mut r = lire_reglages(&app); r.autorisations_faites = true; ecrire_reglages(&app, &r);
+    journaliser(&app, "autorisations : écran passé");
+    if let Some(w) = app.get_webview_window("main") { let _ = w.navigate(r.adresse_coeur.parse::<tauri::Url>().map_err(|e| e.to_string())?); }
+    Ok(())
+}
+/// Rouvre l'écran des autorisations (menu).
+fn ouvrir_autorisations(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") { let _ = w.navigate("tauri://localhost/autorisations.html".parse().unwrap()); }
+    montrer_fenetre(app, false);
 }
 
 /// L'identifiant de cet appareil : l'écran l'utilise pour que le cœur adresse ses actions au bon poste.
@@ -191,7 +209,8 @@ pub fn run() {
         .manage(Etat(Mutex::new(Reglages::default())))
         .manage(pont::EtatPont(std::sync::Arc::new(Mutex::new(pont::Liaison::default()))))
         .invoke_handler(tauri::generate_handler![
-            reglages, enregistrer_reglages, version_coque, plateforme, montrer, masquer, identifiant, poser_jeton,
+            reglages, enregistrer_reglages, version_coque, plateforme, montrer, masquer, identifiant, poser_jeton, terminer_autorisations,
+            autorisations::etat_autorisations, autorisations::demander_autorisation, autorisations::ouvrir_reglage,
             poste::ouvrir_cible, poste::capture_ecran, poste::presse_papiers_lire, poste::presse_papiers_ecrire,
             poste::regler_volume, poste::regler_luminosite, poste::verrouiller, poste::mettre_en_veille, poste::imprimer,
             poste::infos_systeme, poste::chercher_fichiers, poste::lire_fichier, poste::creer_fichier, poste::renommer_fichier,
@@ -206,8 +225,10 @@ pub fn run() {
             // Le pont natif : abonné au flux du cœur, il exécute les actions même fenêtre cachée.
             { let p = app.state::<pont::EtatPont>().0.clone(); if let Ok(mut l) = p.lock() { l.coeur = r.adresse_coeur.clone(); l.appareil = r.appareil.clone(); } pont::demarrer(handle.clone(), p); }
             // La fenêtre principale charge l'interface du cœur (mise à jour sans republier l'application).
-            let url: tauri::Url = r.adresse_coeur.parse().unwrap_or_else(|_| "https://montis.agency-stellar.fr".parse().unwrap());
-            match WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.clone())).title("Montis").inner_size(1180.0, 800.0).min_inner_size(380.0, 520.0).center().visible(true)
+            let url_coeur: tauri::Url = r.adresse_coeur.parse().unwrap_or_else(|_| "https://montis.agency-stellar.fr".parse().unwrap());
+            let depart = if r.autorisations_faites { WebviewUrl::External(url_coeur.clone()) } else { WebviewUrl::App("autorisations.html".into()) };
+            let url = url_coeur.clone();
+            match WebviewWindowBuilder::new(app, "main", depart).title("Montis").inner_size(1180.0, 800.0).min_inner_size(380.0, 520.0).center().visible(true)
                 .on_navigation({ let h = handle.clone(); move |u| { journaliser(&h, &format!("navigation → {u}")); true } })
                 .on_page_load({ let h = handle.clone(); move |_w, p| { journaliser(&h, &format!("page {:?} : {}", p.event(), p.url())); } })
                 .build() {
@@ -230,9 +251,10 @@ pub fn run() {
             let compacte = MenuItem::with_id(app, "compacte", "Appeler (fenêtre compacte)", true, None::<&str>)?;
             let reglages_item = MenuItem::with_id(app, "reglages", "Réglages de l'application…", true, None::<&str>)?;
             let journal_item = MenuItem::with_id(app, "journal", "Journal de la coque…", true, None::<&str>)?;
+            let autorisations_item = MenuItem::with_id(app, "autorisations", "Autorisations…", true, None::<&str>)?;
             let maj = MenuItem::with_id(app, "maj", "Rechercher une mise à jour", true, None::<&str>)?;
             let quitter = MenuItem::with_id(app, "quitter", "Quitter Montis", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&ouvrir, &compacte, &PredefinedMenuItem::separator(app)?, &reglages_item, &journal_item, &maj, &PredefinedMenuItem::separator(app)?, &quitter])?;
+            let menu = Menu::with_items(app, &[&ouvrir, &compacte, &PredefinedMenuItem::separator(app)?, &reglages_item, &autorisations_item, &journal_item, &maj, &PredefinedMenuItem::separator(app)?, &quitter])?;
             let h = handle.clone();
             TrayIconBuilder::with_id("montis")
                 .icon(app.default_window_icon().unwrap().clone())
@@ -241,6 +263,7 @@ pub fn run() {
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(move |app, ev| match ev.id().as_ref() {
+                    "autorisations" => { journaliser(app, "menu : autorisations"); ouvrir_autorisations(app) }
                     "journal" => { let f = fichier_journal(app); journaliser(app, "journal ouvert"); let _ = std::process::Command::new(if cfg!(target_os = "macos") { "open" } else { "notepad" }).arg(&f).spawn(); }
                     "ouvrir" => { journaliser(app, "menu : ouvrir"); montrer_fenetre(app, false) }
                     "compacte" => montrer_fenetre(app, true),

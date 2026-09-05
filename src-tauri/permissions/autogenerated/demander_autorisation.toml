@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-demander-autorisation"
+description = "Enables the demander_autorisation command without any pre-configured scope."
+commands.allow = ["demander_autorisation"]
+
+[[permission]]
+identifier = "deny-demander-autorisation"
+description = "Denies the demander_autorisation command without any pre-configured scope."
+commands.deny = ["demander_autorisation"]

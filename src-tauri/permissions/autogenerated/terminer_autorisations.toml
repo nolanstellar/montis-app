@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-terminer-autorisations"
+description = "Enables the terminer_autorisations command without any pre-configured scope."
+commands.allow = ["terminer_autorisations"]
+
+[[permission]]
+identifier = "deny-terminer-autorisations"
+description = "Denies the terminer_autorisations command without any pre-configured scope."
+commands.deny = ["terminer_autorisations"]

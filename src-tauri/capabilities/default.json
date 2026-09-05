@@ -67,6 +67,10 @@
     "allow-notifier",
     "allow-identifiant",
     "allow-poser-jeton",
-    "allow-envoyer-message"
+    "allow-envoyer-message",
+    "allow-terminer-autorisations",
+    "allow-etat-autorisations",
+    "allow-demander-autorisation",
+    "allow-ouvrir-reglage"
   ]
 }
