@@ -257,7 +257,7 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
-            journaliser(&handle, "icône posée dans la barre");
+            journaliser(&handle, "icône posée dans la barre (Dock et barre des menus)");
             // Raccourci global.
             match poser_raccourci(&handle, &r.raccourci) { Ok(()) => journaliser(&handle, &format!("raccourci {} enregistré", r.raccourci)), Err(e) => journaliser(&handle, &format!("ERREUR raccourci : {e}")) }
             // Premier lancement : la fenêtre s'affiche d'elle-même, complète, pour l'accueil.
