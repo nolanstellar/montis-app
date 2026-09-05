@@ -33,6 +33,20 @@ fn poster(l: &Liaison, route: &str, corps: Value) -> Result<(), String> {
 }
 
 /// Exécute une action venue du cœur et rend (ok, résultat).
+/// La capture (chemin rendu par capture_ecran, éventuellement suivi d'une note entre parenthèses) réduite à 1280 px de large au plus,
+/// encodée en JPEG (qualité 72) et en data-URL : ce que le modèle de vision reçoit. Rien si le fichier ne se lit pas.
+fn image_jointe(resultat: &str) -> Option<String> {
+    use base64::Engine;
+    use image::ImageEncoder;
+    let chemin = resultat.split(" (").next().unwrap_or(resultat).trim();
+    let img = image::open(chemin).ok()?;
+    let img = if img.width() > 1280 { img.thumbnail(1280, u32::MAX) } else { img };
+    let rgb = img.to_rgb8();
+    let mut octets: Vec<u8> = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut octets, 72).write_image(rgb.as_raw(), rgb.width(), rgb.height(), image::ExtendedColorType::Rgb8).ok()?;
+    Some(format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(&octets)))
+}
+
 fn executer(app: &AppHandle, a: &Value) -> (bool, String) {
     let s = |k: &str| a.get(k).and_then(|v| v.as_str()).map(|x| x.to_string());
     let genre = s("genre").unwrap_or_default();
@@ -127,7 +141,9 @@ pub fn demarrer(app: AppHandle, etat: Arc<Mutex<Liaison>>) {
                             let attendu = a2.get("attendu").and_then(|v| v.as_bool()).unwrap_or(false);
                             let (ok, resultat) = executer(&app2, &a2);
                             let id = a2.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                            if attendu { let _ = poster(&l2, "/api/action-resultat", json!({ "id": id, "genre": a2.get("genre"), "ok": ok, "resultat": resultat })); }
+                            // Une capture d'écran : l'image part avec le résultat (réduite, JPEG), pour que le cerveau la regarde.
+                            let image = if ok && a2.get("action").and_then(|v| v.as_str()) == Some("capture_ecran") { image_jointe(&resultat) } else { None };
+                            if attendu { let _ = poster(&l2, "/api/action-resultat", json!({ "id": id, "genre": a2.get("genre"), "ok": ok, "resultat": resultat, "image": image })); }
                             else { let _ = poster(&l2, "/api/action-faite", json!({ "id": id, "genre": a2.get("genre"), "ok": ok, "detail": resultat, "appareil": l2.appareil })); }
                         });
                     }

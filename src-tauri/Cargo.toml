@@ -1,6 +1,6 @@
 [package]
 name = "montis"
-version = "0.1.9"
+version = "0.1.10"
 description = "Montis — l'assistant Stellar sur le poste de travail"
 authors = ["Stellar Agency"]
 edition = "2021"
@@ -28,6 +28,8 @@ serde_json = "1"
 walkdir = "2"
 sysinfo = "0.33"
 xcap = "0.4"
+image = "0.25"
+base64 = "0.22"
 dirs = "6"
 pdf-extract = "0.9"
 chrono = "0.4"
