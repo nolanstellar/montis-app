@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schema.tauri.app/config/2/capability",
+  "identifier": "montis",
+  "description": "Ce que la coque native accorde à l'interface Montis (servie depuis le tunnel ou embarquée).",
+  "windows": ["main", "compacte"],
+  "remote": { "urls": ["https://montis.agency-stellar.fr/*", "http://localhost:4310/*", "http://*.home:4310/*", "http://192.168.*:4310/*"] },
+  "permissions": [
+    "core:default",
+    "core:window:allow-show", "core:window:allow-hide", "core:window:allow-set-focus", "core:window:allow-set-size", "core:window:allow-set-position", "core:window:allow-center", "core:window:allow-set-always-on-top", "core:window:allow-is-visible", "core:window:allow-set-decorations", "core:window:allow-set-title",
+    "core:event:default",
+    "notification:default",
+    "clipboard-manager:allow-read-text", "clipboard-manager:allow-write-text",
+    "global-shortcut:allow-register", "global-shortcut:allow-unregister", "global-shortcut:allow-is-registered",
+    "autostart:allow-enable", "autostart:allow-disable", "autostart:allow-is-enabled",
+    "updater:default",
+    "process:allow-restart",
+    "opener:allow-open-url", "opener:allow-open-path"
+  ]
+}

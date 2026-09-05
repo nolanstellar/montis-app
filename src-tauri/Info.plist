@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>NSMicrophoneUsageDescription</key><string>Montis vous écoute quand vous lui parlez.</string>
+  <key>NSCameraUsageDescription</key><string>Montis peut lire un document que vous lui montrez.</string>
+  <key>NSAppleEventsUsageDescription</key><string>Montis pilote vos applications (volume, fenêtres, impression) quand vous le lui demandez.</string>
+  <key>NSScreenCaptureUsageDescription</key><string>Montis prend une capture d'écran quand vous le lui demandez.</string>
+  <key>LSUIElement</key><true/>
+</dict></plist>

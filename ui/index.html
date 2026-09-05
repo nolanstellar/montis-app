@@ -1,0 +1,4 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Montis</title>
+<style>body{margin:0;background:#050505;color:#f5f3ef;font:15px/1.5 system-ui;display:grid;place-items:center;height:100vh}div{text-align:center;max-width:420px;padding:24px}b{color:#4c6fff}code{background:#111;padding:2px 6px;border-radius:6px}</style></head>
+<body><div><p><b>Montis</b></p><p>La coque native est là, mais le cœur ne répond pas. Vérifie la connexion, ou l'adresse du cœur dans les réglages (icône Montis › Réglages de l'application).</p><p><code id="a"></code></p></div>
+<script>try{window.__TAURI__.core.invoke("reglages").then(r=>{document.getElementById("a").textContent=r.adresse_coeur;setTimeout(()=>location.href=r.adresse_coeur,4000)})}catch(e){}</script></body></html>
