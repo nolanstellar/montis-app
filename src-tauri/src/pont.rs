@@ -49,7 +49,7 @@ fn executer(app: &AppHandle, a: &Value) -> (bool, String) {
                 "veille" => { let t = v.clone().or(c.clone()).unwrap_or_default().to_lowercase(); poste::mettre_en_veille(Some(!(t.contains("ordinateur") || t.contains("machine") || t.contains("pc") || t.contains("mac") || t.contains("compl")))) }
                 "imprimer" => { let copies = v.as_ref().and_then(|x| x.parse::<u32>().ok()); let imprimante = v.filter(|x| x.parse::<u32>().is_err()); poste::imprimer(c.unwrap_or_default(), copies, imprimante) }
                 "file_impression" => poste::imprimer("file".into(), None, None),
-                "infos_systeme" => Ok(serde_json::to_string(&poste::infos_systeme()).unwrap_or_default()),
+                "infos_systeme" => { let i = poste::infos_systeme(); Ok(format!("{} sur {}, processeur {}, {} Go de mémoire dont {} libres, {} Go de disque libres{}.", i.systeme, i.machine, i.processeur, i.memoire_totale_go, i.memoire_libre_go, i.disque_libre_go, i.batterie.map(|b| format!(", batterie {}", b.split(';').next().unwrap_or("").replace("-InternalBattery-0 (id=", "").split(')').last().unwrap_or("").trim())).unwrap_or_default())) }
                 "application_lancer" => poste::application("lancer".into(), c.unwrap_or_default(), v),
                 "application_fermer" => poste::application("fermer".into(), c.unwrap_or_default(), None),
                 "application_basculer" => poste::application("basculer".into(), c.unwrap_or_default(), None),

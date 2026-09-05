@@ -33,19 +33,24 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev
       - run: npm ci
+      # Notarisation Apple par clé d'API App Store Connect (pas de mot de passe Apple ID) : le contenu du fichier .p8 est un secret,
+      # écrit dans un fichier le temps de la construction.
+      - name: Clé de notarisation Apple
+        if: matrix.platform == 'macos-latest' && env.CLE != ''
+        env: { CLE: "${{ secrets.APPLE_API_KEY_CONTENT }}" }
+        run: printf '%s' "$CLE" > "$RUNNER_TEMP/AuthKey.p8" && echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Signature et notarisation Apple : renseigner ces secrets quand le certificat Developer ID (99 €/an) existe ; sans eux, la
-          # construction reste non signée et macOS redemande les autorisations à chaque mise à jour.
+          # Signature Developer ID (certificat exporté en .p12, base64) et notarisation par clé d'API. Sans ces secrets la construction
+          # macOS reste non signée : macOS dit « endommagé » et oublie les autorisations à chaque mise à jour.
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Montis ${{ github.ref_name }}"

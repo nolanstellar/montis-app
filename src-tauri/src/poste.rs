@@ -122,20 +122,30 @@ pub fn capture_ecran(app: AppHandle, fenetre: Option<String>) -> Result<String, 
     let bureau = dirs::desktop_dir().unwrap_or_else(maison);
     let nom = format!("Capture Montis {}.png", chrono::Local::now().format("%Y-%m-%d %H.%M.%S"));
     let chemin = bureau.join(&nom);
+    // « écran », « accueil », « bureau »… désignent tout l'écran, pas une fenêtre ; une fenêtre nommée mais absente → tout l'écran aussi, en le disant.
+    let generique = ["ecran", "écran", "accueil", "bureau", "tout", "entier", "complet", "principal", "screen"];
+    let fenetre = fenetre.filter(|f| { let n = normaliser(f); !n.is_empty() && !generique.iter().any(|g| n == *g || n == format!("{g} d accueil") || n.starts_with(&format!("{g} ")) && n.len() < 16) });
+    let mut note = String::new();
     let image = match fenetre {
-        Some(f) if !f.trim().is_empty() => {
+        Some(f) => {
             let voulu = normaliser(&f);
-            let w = Window::all().map_err(|e| e.to_string())?.into_iter().find(|w| normaliser(&w.title().unwrap_or_default()).contains(&voulu) || normaliser(&w.app_name().unwrap_or_default()).contains(&voulu)).ok_or_else(|| format!("aucune fenêtre « {f} » à l'écran"))?;
-            w.capture_image().map_err(|e| format!("capture de la fenêtre : {e} (sur Mac : autoriser l'enregistrement d'écran dans Réglages Système › Confidentialité)"))?
+            match Window::all().map_err(|e| e.to_string())?.into_iter().find(|w| normaliser(&w.title().unwrap_or_default()).contains(&voulu) || normaliser(&w.app_name().unwrap_or_default()).contains(&voulu)) {
+                Some(w) => w.capture_image().map_err(|e| format!("capture de la fenêtre : {e} (sur Mac : autoriser l'enregistrement d'écran dans Réglages Système › Confidentialité)"))?,
+                None => {
+                    note = format!(" (aucune fenêtre « {f} » à l'écran : j'ai pris tout l'écran)");
+                    let m = Monitor::all().map_err(|e| e.to_string())?.into_iter().find(|m| m.is_primary().unwrap_or(false)).ok_or("aucun écran")?;
+                    m.capture_image().map_err(|e| format!("capture : {e} (sur Mac : autoriser l'enregistrement d'écran dans Réglages Système › Confidentialité)"))?
+                }
+            }
         }
-        _ => {
+        None => {
             let m = Monitor::all().map_err(|e| e.to_string())?.into_iter().find(|m| m.is_primary().unwrap_or(false)).ok_or("aucun écran")?;
             m.capture_image().map_err(|e| format!("capture : {e} (sur Mac : autoriser l'enregistrement d'écran dans Réglages Système › Confidentialité)"))?
         }
     };
     image.save(&chemin).map_err(|e| e.to_string())?;
     let _ = app.notification().builder().title("Montis").body(format!("Capture enregistrée sur le Bureau : {nom}")).show();
-    Ok(chemin.display().to_string())
+    Ok(format!("{}{note}", chemin.display()))
 }
 
 #[tauri::command]
@@ -237,7 +247,7 @@ pub fn imprimer(fichier: String, copies: Option<u32>, imprimante: Option<String>
 }
 
 #[derive(Serialize)]
-pub struct Infos { systeme: String, machine: String, processeur: String, memoire_totale_go: f64, memoire_libre_go: f64, disque_libre_go: f64, batterie: Option<String>, utilisateur: String }
+pub struct Infos { pub systeme: String, pub machine: String, pub processeur: String, pub memoire_totale_go: f64, pub memoire_libre_go: f64, pub disque_libre_go: f64, pub batterie: Option<String>, pub utilisateur: String }
 
 #[tauri::command]
 pub fn infos_systeme() -> Infos {
@@ -401,7 +411,20 @@ pub fn fenetre(action: String, application: Option<String>, x: Option<i32>, y: O
 #[tauri::command]
 pub fn envoyer_message(destinataire: String, texte: String) -> Result<String, String> {
     #[cfg(target_os = "macos")] {
-        let mut d = destinataire.trim().replace([' ', '.', '-'], "");
+        let brut = destinataire.trim();
+        // Un nom plutôt qu'un numéro : Contacts donne le numéro ; sinon Messages retrouve la conversation par le nom.
+        let est_numero = brut.chars().filter(|c| c.is_ascii_digit()).count() >= 6;
+        let mut d = if est_numero { brut.replace([' ', '.', '-'], "") } else {
+            let nom = brut.replace('"', "");
+            // Le nom complet d'abord ; la dictée écorche souvent le nom de famille (« Dylan Ark ») : le prénom seul ensuite.
+            let prenom = nom.split_whitespace().next().unwrap_or(&nom).to_string();
+            let chercher = |n: &str| osascript(&format!(r#"tell application "Contacts"
+    set p to (first person whose name contains "{n}")
+    return value of first phone of p
+end tell"#)).map(|v| v.replace([' ', '.', '-'], ""));
+            chercher(&nom).or_else(|_| if prenom != nom { chercher(&prenom) } else { Err(String::new()) }).unwrap_or(nom)
+        };
+        let prenom_cible = d.split_whitespace().next().unwrap_or(&d).replace('"', "");
         if d.starts_with('0') && d.len() == 10 { d = format!("+33{}", &d[1..]); }
         let t = texte.replace('\\', "\\\\").replace('"', "\\\"");
         let script = format!(r#"tell application "Messages"
@@ -412,9 +435,19 @@ pub fn envoyer_message(destinataire: String, texte: String) -> Result<String, St
         send leTexte to participant cible of svc
         return "iMessage"
     on error
-        set svc2 to 1st account whose service type = SMS and enabled is true
-        send leTexte to participant cible of svc2
-        return "SMS"
+        try
+            set svc2 to 1st account whose service type = SMS and enabled is true
+            send leTexte to participant cible of svc2
+            return "SMS"
+        on error
+            -- dernier recours : la conversation existante qui porte ce nom, sinon ce prénom
+            try
+                send leTexte to (first chat whose name contains cible)
+            on error
+                send leTexte to (first chat whose name contains "{prenom_cible}")
+            end try
+            return "conversation Messages"
+        end try
     end try
 end tell"#);
         let via = osascript(&script).map_err(|e| format!("{e} — Messages n'a pas pu envoyer (autorisation Automatisation refusée, ou transfert de SMS non activé sur l'iPhone)"))?;
