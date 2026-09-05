@@ -98,7 +98,8 @@ pub fn demarrer(app: AppHandle, etat: Arc<Mutex<Liaison>>) {
             // Déclaration (plateforme, version) — le cœur sait qu'un poste natif est là.
             let _ = poster(&l, "/api/appareil", json!({ "appareil": l.appareil, "plateforme": format!("app-{}", std::env::consts::OS), "version": env!("CARGO_PKG_VERSION"), "nom": format!("Montis {}", match std::env::consts::OS { "macos" => "Mac", "windows" => "Windows", o => o }) }));
             let c = client();
-            let mut req = c.get(format!("{}/api/flux", l.coeur.trim_end_matches('/'))).header("accept", "text/event-stream");
+            // L'appareil dans l'adresse : le cœur ne diffuse à cette coque que ce qui concerne sa personne.
+            let mut req = c.get(format!("{}/api/flux?appareil={}", l.coeur.trim_end_matches('/'), l.appareil)).header("accept", "text/event-stream");
             if let Some(ck) = entete_cookie(&l) { req = req.header("cookie", ck); }
             match req.send() {
                 Ok(resp) if resp.status().is_success() => {
