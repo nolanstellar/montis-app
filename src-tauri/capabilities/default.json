@@ -73,6 +73,6 @@
     "allow-demander-autorisation",
     "allow-ouvrir-reglage",
     "allow-relancer",
-    "allow-autorisations_systeme"
+    "allow-autorisations-systeme"
   ]
 }
