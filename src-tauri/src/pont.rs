@@ -89,6 +89,7 @@ fn executer(app: &AppHandle, a: &Value) -> (bool, String) {
 pub fn demarrer(app: AppHandle, etat: Arc<Mutex<Liaison>>) {
     std::thread::spawn(move || {
         let mut generation_vue = String::new();
+        let mut dernier_message = String::new();   // le même refus ne s'écrit qu'une fois dans le journal
         loop {
             let l = etat.lock().map(|g| g.clone()).unwrap_or_default();
             if l.coeur.is_empty() || l.appareil.is_empty() { std::thread::sleep(Duration::from_secs(2)); continue; }
@@ -101,9 +102,10 @@ pub fn demarrer(app: AppHandle, etat: Arc<Mutex<Liaison>>) {
             if let Some(ck) = entete_cookie(&l) { req = req.header("cookie", ck); }
             match req.send() {
                 Ok(resp) if resp.status().is_success() => {
+                    crate::journaliser(&app, &format!("pont : connecté au flux du cœur ({}){}", l.coeur, if l.jeton.is_empty() { " sans jeton (local)" } else { " avec le jeton de la porte" })); dernier_message.clear();
                     let lecteur = BufReader::new(resp);
                     for ligne in lecteur.lines() {
-                        let Ok(ligne) = ligne else { break };
+                        let Ok(ligne) = ligne else { crate::journaliser(&app, "pont : flux coupé, reconnexion"); break };
                         // L'état a changé (autre cœur, autre jeton) : on recommence proprement.
                         if let Ok(g) = etat.lock() { if format!("{}|{}|{}", g.coeur, g.appareil, g.jeton) != cle { break; } }
                         let Some(donnees) = ligne.strip_prefix("data: ") else { continue };
@@ -129,8 +131,8 @@ pub fn demarrer(app: AppHandle, etat: Arc<Mutex<Liaison>>) {
                         });
                     }
                 }
-                Ok(resp) => { eprintln!("[pont] flux refusé : {}", resp.status()); }
-                Err(e) => { eprintln!("[pont] cœur injoignable : {e}"); }
+                Ok(resp) => { let m = format!("pont : flux refusé par le cœur ({}) — {}", resp.status(), if l.jeton.is_empty() { "il faut passer la porte dans la fenêtre Montis (mot de passe d'entreprise), le pont suivra" } else { "jeton refusé : repasser la porte" }); if m != dernier_message { crate::journaliser(&app, &m); dernier_message = m; } }
+                Err(e) => { let m = format!("pont : cœur injoignable : {e}"); if m != dernier_message { crate::journaliser(&app, &m); dernier_message = m; } }
             }
             std::thread::sleep(Duration::from_secs(3));
         }

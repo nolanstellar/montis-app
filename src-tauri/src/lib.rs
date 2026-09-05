@@ -32,10 +32,13 @@ pub struct Reglages {
     /// L'écran des autorisations a été passé une fois.
     #[serde(default)]
     pub autorisations_faites: bool,
+    /// Jeton de la porte du cœur (cookie montis_cle), gardé pour que le pont natif se connecte sans attendre la page.
+    #[serde(default)]
+    pub jeton: String,
 }
 impl Default for Reglages {
     fn default() -> Self {
-        Self { adresse_coeur: "https://montis.agency-stellar.fr".into(), raccourci: if cfg!(target_os = "macos") { "Alt+Space".into() } else { "Ctrl+Space".into() }, compacte: true, appareil: String::new(), autorisations_faites: false }
+        Self { adresse_coeur: "https://montis.agency-stellar.fr".into(), raccourci: if cfg!(target_os = "macos") { "Alt+Space".into() } else { "Ctrl+Space".into() }, compacte: true, appareil: String::new(), autorisations_faites: false, jeton: String::new() }
     }
 }
 fn identifiant_neuf() -> String {
@@ -113,9 +116,11 @@ fn identifiant(app: AppHandle) -> String { lire_reglages(&app).appareil }
 
 /// La page (qui a passé la porte) confie à la coque le jeton de la porte : le pont natif peut alors joindre le cœur par le tunnel.
 #[tauri::command]
-fn poser_jeton(pont: tauri::State<pont::EtatPont>, jeton: String) -> Result<(), String> {
-    let mut l = pont.0.lock().map_err(|e| e.to_string())?;
-    l.jeton = jeton.trim().to_string();
+fn poser_jeton(app: AppHandle, pont: tauri::State<pont::EtatPont>, jeton: String) -> Result<(), String> {
+    let j = jeton.trim().to_string();
+    { let mut l = pont.0.lock().map_err(|e| e.to_string())?; if l.jeton == j { return Ok(()); } l.jeton = j.clone(); }
+    let mut r = lire_reglages(&app); r.jeton = j; ecrire_reglages(&app, &r);
+    journaliser(&app, "jeton de la porte reçu de la page : le pont se reconnecte");
     Ok(())
 }
 
@@ -223,7 +228,7 @@ pub fn run() {
             journaliser(&handle, &format!("démarrage v{} · {} · cœur {} · raccourci {} · appareil {}{}", env!("CARGO_PKG_VERSION"), std::env::consts::OS, r.adresse_coeur, r.raccourci, r.appareil, if premier_lancement { " · PREMIER LANCEMENT" } else { "" }));
             *app.state::<Etat>().0.lock().unwrap() = r.clone();
             // Le pont natif : abonné au flux du cœur, il exécute les actions même fenêtre cachée.
-            { let p = app.state::<pont::EtatPont>().0.clone(); if let Ok(mut l) = p.lock() { l.coeur = r.adresse_coeur.clone(); l.appareil = r.appareil.clone(); } pont::demarrer(handle.clone(), p); }
+            { let p = app.state::<pont::EtatPont>().0.clone(); if let Ok(mut l) = p.lock() { l.coeur = r.adresse_coeur.clone(); l.appareil = r.appareil.clone(); l.jeton = r.jeton.clone(); } pont::demarrer(handle.clone(), p); }
             // La fenêtre principale charge l'interface du cœur (mise à jour sans republier l'application).
             let url_coeur: tauri::Url = r.adresse_coeur.parse().unwrap_or_else(|_| "https://montis.agency-stellar.fr".parse().unwrap());
             let depart = if r.autorisations_faites { WebviewUrl::External(url_coeur.clone()) } else { WebviewUrl::App("autorisations.html".into()) };

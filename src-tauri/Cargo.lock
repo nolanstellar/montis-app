@@ -2605,7 +2605,7 @@ dependencies = [
 
 [[package]]
 name = "montis"
-version = "0.1.4"
+version = "0.1.6"
 dependencies = [
  "chrono",
  "core-foundation 0.10.1",
