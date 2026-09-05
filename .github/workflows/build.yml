@@ -52,8 +52,18 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Montis ${{ github.ref_name }}"
-          releaseBody: "Installateurs Mac (.dmg), Windows (.exe / .msi) et Linux (.AppImage / .deb). Version non signée : Mac → clic droit › Ouvrir ; Windows → « Informations complémentaires » › « Exécuter quand même »."
+          releaseBody: "Montis pour Mac (universel, signé et notarisé) : Montis-Mac.dmg. Montis pour Windows : Montis-Windows-setup.exe (non signé : « Informations complémentaires » › « Exécuter quand même »). Adresses stables de la dernière version : https://github.com/nolanstellar/montis-app/releases/latest/download/Montis-Mac.dmg et https://github.com/nolanstellar/montis-app/releases/latest/download/Montis-Windows-setup.exe"
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
           args: ${{ matrix.args }}
+      # ADRESSE STABLE : une copie de l'installateur Windows sous un nom sans version, pour que le site pointe toujours vers
+      # https://github.com/nolanstellar/montis-app/releases/latest/download/Montis-Windows-setup.exe
+      - name: Adresse stable Windows
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: |
+          $exe = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          Copy-Item $exe.FullName Montis-Windows-setup.exe
+          gh release upload "${{ github.ref_name }}" Montis-Windows-setup.exe --clobber
