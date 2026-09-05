@@ -1,6 +1,6 @@
 [package]
 name = "montis"
-version = "0.1.3"
+version = "0.1.4"
 description = "Montis — l'assistant Stellar sur le poste de travail"
 authors = ["Stellar Agency"]
 edition = "2021"

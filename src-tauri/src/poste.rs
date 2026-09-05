@@ -394,6 +394,35 @@ pub fn fenetre(action: String, application: Option<String>, x: Option<i32>, y: O
     #[allow(unreachable_code)] Err("non pris en charge".into())
 }
 
+// ---------------------------------------------------------------- messages (Mac : l'application Messages envoie iMessage ou SMS via l'iPhone)
+
+/// Envoie un message par l'application Messages du Mac : iMessage si le correspondant y est, sinon SMS relayé par l'iPhone
+/// (Réglages iPhone › Messages › Transfert de SMS). Demande une fois l'autorisation « Automatisation » pour Messages.
+#[tauri::command]
+pub fn envoyer_message(destinataire: String, texte: String) -> Result<String, String> {
+    #[cfg(target_os = "macos")] {
+        let mut d = destinataire.trim().replace([' ', '.', '-'], "");
+        if d.starts_with('0') && d.len() == 10 { d = format!("+33{}", &d[1..]); }
+        let t = texte.replace('\\', "\\\\").replace('"', "\\\"");
+        let script = format!(r#"tell application "Messages"
+    set leTexte to "{t}"
+    set cible to "{d}"
+    try
+        set svc to 1st account whose service type = iMessage and enabled is true
+        send leTexte to participant cible of svc
+        return "iMessage"
+    on error
+        set svc2 to 1st account whose service type = SMS and enabled is true
+        send leTexte to participant cible of svc2
+        return "SMS"
+    end try
+end tell"#);
+        let via = osascript(&script).map_err(|e| format!("{e} — Messages n'a pas pu envoyer (autorisation Automatisation refusée, ou transfert de SMS non activé sur l'iPhone)"))?;
+        return Ok(format!("Message envoyé à {destinataire} par {via}."));
+    }
+    #[cfg(not(target_os = "macos"))] { let _ = (destinataire, texte); Err("l'envoi de messages n'existe que sur Mac (application Messages) ; depuis un PC, pas de SMS".into()) }
+}
+
 // ---------------------------------------------------------------- notification système
 
 #[tauri::command]

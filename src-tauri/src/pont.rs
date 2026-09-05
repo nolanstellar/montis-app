@@ -74,7 +74,12 @@ fn executer(app: &AppHandle, a: &Value) -> (bool, String) {
         "naviguer" => poste::ouvrir_cible(a.pointer("/liens/google").and_then(|v| v.as_str()).unwrap_or_default().to_string()),
         "ouvrir_url" => poste::ouvrir_cible(s("url").unwrap_or_default()),
         "appeler" => poste::ouvrir_cible(s("lien").unwrap_or_default()),
-        "message" => poste::ouvrir_cible(a.pointer("/liens/sms").and_then(|v| v.as_str()).unwrap_or_default().to_string()),
+        "message" => {
+            // Sur Mac, Messages envoie pour de bon ; ailleurs, on ouvre le lien préparé (Messages/WhatsApp) et la personne appuie.
+            let r = poste::envoyer_message(s("tel").unwrap_or_default(), s("texte").unwrap_or_default());
+            if r.is_ok() { r } else { poste::ouvrir_cible(a.pointer("/liens/sms").and_then(|v| v.as_str()).unwrap_or_default().to_string()).and(r) }
+        }
+        "message_envoyer" => poste::envoyer_message(s("tel").unwrap_or_default(), s("texte").unwrap_or_default()),
         autre => Err(format!("genre inconnu « {autre} »")),
     };
     match r { Ok(t) => (true, t), Err(e) => (false, e) }

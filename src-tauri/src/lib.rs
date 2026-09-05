@@ -195,7 +195,7 @@ pub fn run() {
             poste::ouvrir_cible, poste::capture_ecran, poste::presse_papiers_lire, poste::presse_papiers_ecrire,
             poste::regler_volume, poste::regler_luminosite, poste::verrouiller, poste::mettre_en_veille, poste::imprimer,
             poste::infos_systeme, poste::chercher_fichiers, poste::lire_fichier, poste::creer_fichier, poste::renommer_fichier,
-            poste::deplacer_fichier, poste::lister_dossier, poste::application, poste::fenetre, poste::notifier
+            poste::deplacer_fichier, poste::lister_dossier, poste::application, poste::fenetre, poste::notifier, poste::envoyer_message
         ])
         .setup(|app| {
             let handle = app.handle().clone();
