@@ -190,7 +190,12 @@ fn poser_raccourci(app: &AppHandle, texte: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-/// Cherche, télécharge et installe une mise à jour publiée ; redémarre l'application. Tout est journalisé.
+/// Deux canaux : l'application STABLE (identifiant fr.agency-stellar.montis) suit les versions publiées et installe la mise à jour en
+/// arrière-plan, active au PROCHAIN lancement, sans fenêtre ni redémarrage ; l'application BÊTA (identifiant …montis.beta) suit les
+/// pré-versions et redémarre aussitôt — c'est l'application de test, installée à côté, qui ne touche jamais à la stable.
+fn est_beta(app: &AppHandle) -> bool { app.config().identifier.ends_with(".beta") }
+
+/// Cherche, télécharge et installe une mise à jour publiée. Tout est journalisé.
 async fn verifier_mise_a_jour(app: &AppHandle) {
     use tauri_plugin_updater::UpdaterExt;
     let u = match app.updater() { Ok(u) => u, Err(e) => { journaliser(app, &format!("mise à jour : updater indisponible : {e}")); return; } };
@@ -199,7 +204,10 @@ async fn verifier_mise_a_jour(app: &AppHandle) {
             journaliser(app, &format!("mise à jour disponible : {} → {}", env!("CARGO_PKG_VERSION"), maj.version));
             let _ = app.emit("montis://maj", serde_json::json!({ "version": maj.version }));
             match maj.download_and_install(|_, _| {}, || {}).await {
-                Ok(()) => { journaliser(app, "mise à jour installée → redémarrage"); app.restart(); }
+                Ok(()) => {
+                    if est_beta(app) { journaliser(app, "mise à jour installée → redémarrage (canal bêta)"); app.restart(); }
+                    else { journaliser(app, &format!("mise à jour {} installée en arrière-plan : active au prochain lancement de Montis (canal stable)", maj.version)); }
+                }
                 Err(e) => journaliser(app, &format!("mise à jour : échec : {e}")),
             }
         }

@@ -54,16 +54,27 @@ jobs:
           releaseName: "Montis ${{ github.ref_name }}"
           releaseBody: "Montis pour Mac (universel, signé et notarisé) : Montis-Mac.dmg. Montis pour Windows : Montis-Windows-setup.exe (non signé : « Informations complémentaires » › « Exécuter quand même »). Adresses stables de la dernière version : https://github.com/nolanstellar/montis-app/releases/latest/download/Montis-Mac.dmg et https://github.com/nolanstellar/montis-app/releases/latest/download/Montis-Windows-setup.exe"
           releaseDraft: false
-          prerelease: false
+          # CANAL : un tag « -beta » publie une PRÉ-VERSION (canal bêta, application « Montis Bêta ») ; un tag sans suffixe publie la version
+          # stable, que seul « publie en stable » déclenche. L'application stable suit releases/latest (les pré-versions n'y entrent jamais).
+          prerelease: ${{ contains(github.ref_name, '-beta') }}
           includeUpdaterJson: true
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} ${{ contains(github.ref_name, '-beta') && '--config src-tauri/tauri.beta.conf.json' || '' }}
       # ADRESSE STABLE : une copie de l'installateur Windows sous un nom sans version, pour que le site pointe toujours vers
       # https://github.com/nolanstellar/montis-app/releases/latest/download/Montis-Windows-setup.exe
       - name: Adresse stable Windows
-        if: matrix.platform == 'windows-latest'
+        if: matrix.platform == 'windows-latest' && !contains(github.ref_name, '-beta')
         shell: pwsh
         env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
         run: |
           $exe = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
           Copy-Item $exe.FullName Montis-Windows-setup.exe
           gh release upload "${{ github.ref_name }}" Montis-Windows-setup.exe --clobber
+      # CANAL BÊTA : la publication mobile « beta » porte toujours le latest.json de la dernière pré-version — c'est elle que suit « Montis Bêta ».
+      - name: Canal bêta (latest.json)
+        if: matrix.platform == 'windows-latest' && contains(github.ref_name, '-beta')
+        shell: pwsh
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: |
+          gh release view beta 2>$null; if ($LASTEXITCODE -ne 0) { gh release create beta --prerelease --title "Canal bêta (Montis Bêta)" --notes "Publication mobile : latest.json de la dernière pré-version. Ne pas supprimer." }
+          gh release download "${{ github.ref_name }}" -p latest.json -D . --clobber
+          gh release upload beta latest.json --clobber
