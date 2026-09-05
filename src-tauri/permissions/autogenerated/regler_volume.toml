@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-regler-volume"
+description = "Enables the regler_volume command without any pre-configured scope."
+commands.allow = ["regler_volume"]
+
+[[permission]]
+identifier = "deny-regler-volume"
+description = "Denies the regler_volume command without any pre-configured scope."
+commands.deny = ["regler_volume"]

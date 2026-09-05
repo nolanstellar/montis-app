@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-masquer"
+description = "Enables the masquer command without any pre-configured scope."
+commands.allow = ["masquer"]
+
+[[permission]]
+identifier = "deny-masquer"
+description = "Denies the masquer command without any pre-configured scope."
+commands.deny = ["masquer"]

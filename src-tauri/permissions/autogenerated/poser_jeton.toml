@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-poser-jeton"
+description = "Enables the poser_jeton command without any pre-configured scope."
+commands.allow = ["poser_jeton"]
+
+[[permission]]
+identifier = "deny-poser-jeton"
+description = "Denies the poser_jeton command without any pre-configured scope."
+commands.deny = ["poser_jeton"]

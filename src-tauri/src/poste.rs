@@ -67,9 +67,23 @@ pub fn ouvrir_cible(cible: String) -> Result<String, String> {
 
 // ---------------------------------------------------------------- applications
 
+/// Les noms qu'on dit en français → le nom que le système connaît.
+fn nom_systeme(nom: &str) -> String {
+    let n = normaliser(nom.trim());
+    let table: &[(&str, &str, &str)] = &[
+        ("calculette", "Calculator", "calc"), ("calculatrice", "Calculator", "calc"), ("mail", "Mail", "outlook"), ("courrier", "Mail", "outlook"), ("navigateur", "Safari", "msedge"),
+        ("notes", "Notes", "notepad"), ("bloc-notes", "TextEdit", "notepad"), ("bloc notes", "TextEdit", "notepad"), ("rappels", "Reminders", "outlook"), ("calendrier", "Calendar", "outlook"), ("agenda", "Calendar", "outlook"),
+        ("musique", "Music", "wmplayer"), ("photos", "Photos", "ms-photos:"), ("messages", "Messages", "ms-chat:"), ("reglages systeme", "System Settings", "ms-settings:"), ("preferences systeme", "System Settings", "ms-settings:"), ("parametres", "System Settings", "ms-settings:"),
+        ("apercu", "Preview", "mspaint"), ("terminal", "Terminal", "wt"), ("finder", "Finder", "explorer"), ("explorateur", "Finder", "explorer"), ("fichiers", "Finder", "explorer"), ("chrome", "Google Chrome", "chrome"), ("word", "Microsoft Word", "winword"), ("excel", "Microsoft Excel", "excel"), ("powerpoint", "Microsoft PowerPoint", "powerpnt"), ("teams", "Microsoft Teams", "ms-teams:"), ("spotify", "Spotify", "spotify:"), ("whatsapp", "WhatsApp", "whatsapp:"), ("visual studio code", "Visual Studio Code", "code"), ("vscode", "Visual Studio Code", "code"),
+    ];
+    for (fr, mac, win) in table { if n == *fr { return if cfg!(target_os = "macos") { mac.to_string() } else { win.to_string() }; } }
+    nom.trim().to_string()
+}
+
 #[tauri::command]
 pub fn application(action: String, nom: String, fichier: Option<String>) -> Result<String, String> {
-    let n = nom.trim();
+    let nom = nom_systeme(&nom);
+    let n = nom.as_str();
     match action.as_str() {
         "lancer" | "ouvrir" => {
             #[cfg(target_os = "macos")] {
@@ -228,7 +242,7 @@ pub struct Infos { systeme: String, machine: String, processeur: String, memoire
 #[tauri::command]
 pub fn infos_systeme() -> Infos {
     use sysinfo::{Disks, System};
-    let mut s = System::new_all(); s.refresh_all();
+    let mut s = System::new(); s.refresh_memory(); s.refresh_cpu_all();
     let disques = Disks::new_with_refreshed_list();
     let libre = disques.list().iter().filter(|d| d.mount_point() == Path::new("/") || d.mount_point().to_string_lossy().starts_with("C:")).map(|d| d.available_space()).max().unwrap_or(0);
     let batterie = { #[cfg(target_os = "macos")] { shell("pmset", &["-g", "batt"]).ok().and_then(|o| o.lines().nth(1).map(|l| l.trim().to_string())) } #[cfg(target_os = "windows")] { powershell("(Get-WmiObject Win32_Battery).EstimatedChargeRemaining").ok().filter(|s| !s.is_empty()).map(|s| format!("{s} %")) } #[cfg(not(any(target_os = "macos", target_os = "windows")))] { None } };
@@ -258,12 +272,20 @@ pub fn chercher_fichiers(requete: String, dossier: Option<String>, maximum: Opti
     if mots.is_empty() { return Err("donne quelques mots du nom à chercher".into()); }
     let max = maximum.unwrap_or(20).min(100);
     let debut = std::time::Instant::now();
-    let mut trouves = Vec::new();
-    for entree in walkdir::WalkDir::new(&racine).follow_links(false).max_depth(9).into_iter().filter_entry(|e| !e.file_name().to_str().map(|n| IGNORES.contains(&n) || (n.starts_with('.') && e.depth() > 0)).unwrap_or(false)) {
-        if debut.elapsed().as_secs() > 8 || trouves.len() >= max { break; }
-        let Ok(e) = entree else { continue };
-        let nom = normaliser(&e.file_name().to_string_lossy());
-        if mots.iter().all(|m| nom.contains(m)) { trouves.push(e.path().display().to_string()); }
+    let mut trouves: Vec<String> = Vec::new();
+    // Bureau, Documents, Téléchargements d'abord (c'est là que vivent les devis), puis le reste du dossier personnel.
+    let mut racines: Vec<PathBuf> = Vec::new();
+    if racine == maison() { for d in [dirs::desktop_dir(), dirs::document_dir(), dirs::download_dir()].into_iter().flatten() { if d.exists() { racines.push(d); } } }
+    racines.push(racine.clone());
+    for r in racines {
+        for entree in walkdir::WalkDir::new(&r).follow_links(false).max_depth(8).into_iter().filter_entry(|e| !e.file_name().to_str().map(|n| IGNORES.contains(&n) || (n.starts_with('.') && e.depth() > 0)).unwrap_or(false)) {
+            if debut.elapsed().as_secs() > 12 || trouves.len() >= max { break; }
+            let Ok(e) = entree else { continue };
+            let nom = normaliser(&e.file_name().to_string_lossy());
+            let chemin = e.path().display().to_string();
+            if mots.iter().all(|m| nom.contains(m)) && !trouves.contains(&chemin) { trouves.push(chemin); }
+        }
+        if trouves.len() >= max || debut.elapsed().as_secs() > 12 { break; }
     }
     Ok(trouves)
 }

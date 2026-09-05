@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-regler-luminosite"
+description = "Enables the regler_luminosite command without any pre-configured scope."
+commands.allow = ["regler_luminosite"]
+
+[[permission]]
+identifier = "deny-regler-luminosite"
+description = "Denies the regler_luminosite command without any pre-configured scope."
+commands.deny = ["regler_luminosite"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-creer-fichier"
+description = "Enables the creer_fichier command without any pre-configured scope."
+commands.allow = ["creer_fichier"]
+
+[[permission]]
+identifier = "deny-creer-fichier"
+description = "Denies the creer_fichier command without any pre-configured scope."
+commands.deny = ["creer_fichier"]

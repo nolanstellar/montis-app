@@ -9,22 +9,6 @@
   "app": {
     "withGlobalTauri": true,
     "macOSPrivateApi": false,
-    "windows": [
-      {
-        "label": "main",
-        "title": "Montis",
-        "url": "index.html",
-        "width": 1180,
-        "height": 800,
-        "minWidth": 380,
-        "minHeight": 520,
-        "visible": false,
-        "center": true,
-        "decorations": true,
-        "alwaysOnTop": false,
-        "skipTaskbar": false
-      }
-    ],
     "trayIcon": {
       "id": "montis",
       "iconPath": "icons/icon.png",
@@ -37,15 +21,28 @@
   },
   "plugins": {
     "updater": {
-      "endpoints": ["https://github.com/nolanstellar/montis-app/releases/latest/download/latest.json"],
+      "endpoints": [
+        "https://github.com/nolanstellar/montis-app/releases/latest/download/latest.json"
+      ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFDQ0ZEQkIxMzk2RkU5RUMKUldUczZXODVzZHZQcktXekpYYzh1NXZ2WTczN2doYzRmTExCYk10Z0dhWmhwbTYwTGNtY3JOTisK"
     }
   },
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
-    "targets": ["dmg", "app", "nsis", "msi"],
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "targets": [
+      "dmg",
+      "app",
+      "nsis",
+      "msi"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
     "category": "Productivity",
     "shortDescription": "Montis, l'assistant Stellar sur votre poste de travail.",
     "longDescription": "Montis vit dans la barre des menus. Appelez-le par la voix ou un raccourci : il répond et agit sur cet ordinateur, puis s'efface.",
@@ -54,8 +51,15 @@
       "entitlements": "entitlements.plist"
     },
     "windows": {
-      "nsis": { "installMode": "currentUser", "languages": ["French"] },
-      "wix": { "language": "fr-FR" }
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "French"
+        ]
+      },
+      "wix": {
+        "language": "fr-FR"
+      }
     }
   }
 }

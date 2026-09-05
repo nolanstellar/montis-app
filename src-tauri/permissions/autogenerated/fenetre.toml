@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-fenetre"
+description = "Enables the fenetre command without any pre-configured scope."
+commands.allow = ["fenetre"]
+
+[[permission]]
+identifier = "deny-fenetre"
+description = "Denies the fenetre command without any pre-configured scope."
+commands.deny = ["fenetre"]

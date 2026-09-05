@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-mettre-en-veille"
+description = "Enables the mettre_en_veille command without any pre-configured scope."
+commands.allow = ["mettre_en_veille"]
+
+[[permission]]
+identifier = "deny-mettre-en-veille"
+description = "Denies the mettre_en_veille command without any pre-configured scope."
+commands.deny = ["mettre_en_veille"]

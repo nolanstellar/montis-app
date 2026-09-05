@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-chercher-fichiers"
+description = "Enables the chercher_fichiers command without any pre-configured scope."
+commands.allow = ["chercher_fichiers"]
+
+[[permission]]
+identifier = "deny-chercher-fichiers"
+description = "Denies the chercher_fichiers command without any pre-configured scope."
+commands.deny = ["chercher_fichiers"]

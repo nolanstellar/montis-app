@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-presse-papiers-lire"
+description = "Enables the presse_papiers_lire command without any pre-configured scope."
+commands.allow = ["presse_papiers_lire"]
+
+[[permission]]
+identifier = "deny-presse-papiers-lire"
+description = "Denies the presse_papiers_lire command without any pre-configured scope."
+commands.deny = ["presse_papiers_lire"]

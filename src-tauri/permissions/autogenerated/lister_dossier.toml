@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-lister-dossier"
+description = "Enables the lister_dossier command without any pre-configured scope."
+commands.allow = ["lister_dossier"]
+
+[[permission]]
+identifier = "deny-lister-dossier"
+description = "Denies the lister_dossier command without any pre-configured scope."
+commands.deny = ["lister_dossier"]

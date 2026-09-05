@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-presse-papiers-ecrire"
+description = "Enables the presse_papiers_ecrire command without any pre-configured scope."
+commands.allow = ["presse_papiers_ecrire"]
+
+[[permission]]
+identifier = "deny-presse-papiers-ecrire"
+description = "Denies the presse_papiers_ecrire command without any pre-configured scope."
+commands.deny = ["presse_papiers_ecrire"]

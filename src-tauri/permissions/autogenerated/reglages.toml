@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reglages"
+description = "Enables the reglages command without any pre-configured scope."
+commands.allow = ["reglages"]
+
+[[permission]]
+identifier = "deny-reglages"
+description = "Denies the reglages command without any pre-configured scope."
+commands.deny = ["reglages"]

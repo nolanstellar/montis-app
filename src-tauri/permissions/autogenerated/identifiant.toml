@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-identifiant"
+description = "Enables the identifiant command without any pre-configured scope."
+commands.allow = ["identifiant"]
+
+[[permission]]
+identifier = "deny-identifiant"
+description = "Denies the identifiant command without any pre-configured scope."
+commands.deny = ["identifiant"]

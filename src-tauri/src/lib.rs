@@ -8,6 +8,7 @@
 //! et le raccourci.
 
 mod poste;
+mod pont;
 
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
@@ -24,11 +25,20 @@ pub struct Reglages {
     pub adresse_coeur: String,
     pub raccourci: String,
     pub compacte: bool,
+    /// Identifiant stable de cet appareil auprès du cœur (créé une fois).
+    #[serde(default)]
+    pub appareil: String,
 }
 impl Default for Reglages {
     fn default() -> Self {
-        Self { adresse_coeur: "https://montis.agency-stellar.fr".into(), raccourci: if cfg!(target_os = "macos") { "Alt+Space".into() } else { "Ctrl+Space".into() }, compacte: true }
+        Self { adresse_coeur: "https://montis.agency-stellar.fr".into(), raccourci: if cfg!(target_os = "macos") { "Alt+Space".into() } else { "Ctrl+Space".into() }, compacte: true, appareil: String::new() }
     }
+}
+fn identifiant_neuf() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let n = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let s = format!("{:x}{:x}", n, std::process::id());
+    s.chars().rev().take(16).collect::<String>()
 }
 pub struct Etat(pub Mutex<Reglages>);
 
@@ -38,7 +48,9 @@ fn fichier_reglages(app: &AppHandle) -> std::path::PathBuf {
     d.join("reglages.json")
 }
 fn lire_reglages(app: &AppHandle) -> Reglages {
-    std::fs::read_to_string(fichier_reglages(app)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+    let mut r: Reglages = std::fs::read_to_string(fichier_reglages(app)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    if r.appareil.is_empty() { r.appareil = identifiant_neuf(); ecrire_reglages(app, &r); }
+    r
 }
 fn ecrire_reglages(app: &AppHandle, r: &Reglages) {
     let _ = std::fs::write(fichier_reglages(app), serde_json::to_string_pretty(r).unwrap_or_default());
@@ -58,7 +70,20 @@ fn enregistrer_reglages(app: AppHandle, etat: tauri::State<Etat>, r: Reglages) -
     *etat.0.lock().map_err(|e| e.to_string())? = r.clone();
     if ancien.adresse_coeur != r.adresse_coeur {
         if let Some(w) = app.get_webview_window("main") { let _ = w.navigate(r.adresse_coeur.parse::<tauri::Url>().map_err(|e| e.to_string())?); }
+        if let Ok(mut l) = app.state::<pont::EtatPont>().0.lock() { l.coeur = r.adresse_coeur.clone(); l.jeton.clear(); }
     }
+    Ok(())
+}
+
+/// L'identifiant de cet appareil : l'écran l'utilise pour que le cœur adresse ses actions au bon poste.
+#[tauri::command]
+fn identifiant(app: AppHandle) -> String { lire_reglages(&app).appareil }
+
+/// La page (qui a passé la porte) confie à la coque le jeton de la porte : le pont natif peut alors joindre le cœur par le tunnel.
+#[tauri::command]
+fn poser_jeton(pont: tauri::State<pont::EtatPont>, jeton: String) -> Result<(), String> {
+    let mut l = pont.0.lock().map_err(|e| e.to_string())?;
+    l.jeton = jeton.trim().to_string();
     Ok(())
 }
 
@@ -127,8 +152,9 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(Etat(Mutex::new(Reglages::default())))
+        .manage(pont::EtatPont(std::sync::Arc::new(Mutex::new(pont::Liaison::default()))))
         .invoke_handler(tauri::generate_handler![
-            reglages, enregistrer_reglages, version_coque, plateforme, montrer, masquer,
+            reglages, enregistrer_reglages, version_coque, plateforme, montrer, masquer, identifiant, poser_jeton,
             poste::ouvrir_cible, poste::capture_ecran, poste::presse_papiers_lire, poste::presse_papiers_ecrire,
             poste::regler_volume, poste::regler_luminosite, poste::verrouiller, poste::mettre_en_veille, poste::imprimer,
             poste::infos_systeme, poste::chercher_fichiers, poste::lire_fichier, poste::creer_fichier, poste::renommer_fichier,
@@ -138,11 +164,11 @@ pub fn run() {
             let handle = app.handle().clone();
             let r = lire_reglages(&handle);
             *app.state::<Etat>().0.lock().unwrap() = r.clone();
+            // Le pont natif : abonné au flux du cœur, il exécute les actions même fenêtre cachée.
+            { let p = app.state::<pont::EtatPont>().0.clone(); if let Ok(mut l) = p.lock() { l.coeur = r.adresse_coeur.clone(); l.appareil = r.appareil.clone(); } pont::demarrer(handle.clone(), p); }
             // La fenêtre principale charge l'interface du cœur (mise à jour sans republier l'application).
             let url: tauri::Url = r.adresse_coeur.parse().unwrap_or_else(|_| "https://montis.agency-stellar.fr".parse().unwrap());
-            if app.get_webview_window("main").is_none() {
-                WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url)).title("Montis").inner_size(1180.0, 800.0).visible(false).build()?;
-            } else if let Some(w) = app.get_webview_window("main") { let _ = w.navigate(url); }
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url)).title("Montis").inner_size(1180.0, 800.0).min_inner_size(380.0, 520.0).center().visible(false).build()?;
             // La fenêtre se cache au lieu de se fermer : Montis reste dans la barre.
             if let Some(w) = app.get_webview_window("main") {
                 let w2 = w.clone();

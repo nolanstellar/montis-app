@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-infos-systeme"
+description = "Enables the infos_systeme command without any pre-configured scope."
+commands.allow = ["infos_systeme"]
+
+[[permission]]
+identifier = "deny-infos-systeme"
+description = "Denies the infos_systeme command without any pre-configured scope."
+commands.deny = ["infos_systeme"]

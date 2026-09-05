@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ouvrir-cible"
+description = "Enables the ouvrir_cible command without any pre-configured scope."
+commands.allow = ["ouvrir_cible"]
+
+[[permission]]
+identifier = "deny-ouvrir-cible"
+description = "Denies the ouvrir_cible command without any pre-configured scope."
+commands.deny = ["ouvrir_cible"]
