@@ -13,10 +13,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
-            args: "--target aarch64-apple-darwin"
-          - platform: macos-latest
-            args: "--target x86_64-apple-darwin"
+          # macOS n'est plus construit ici : la version Mac est signée (Developer ID) et notarisée sur le Mac de l'éditeur, puis ajoutée
+          # à la publication à la main (voir README, « Publier la version Mac »). Les secrets APPLE_* restent prêts pour y revenir.
           - platform: windows-latest
             args: ""
           - platform: ubuntu-22.04
