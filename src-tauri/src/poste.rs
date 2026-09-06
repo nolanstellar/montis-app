@@ -10,12 +10,37 @@ use tauri_plugin_notification::NotificationExt;
 fn maison() -> PathBuf { dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")) }
 
 /// Un chemin donné par la personne : « ~/Documents », relatif au dossier personnel, ou absolu.
+/// Les dossiers que la personne nomme en français (« Bureau », « Documents », « Téléchargements ») et leurs vrais chemins.
+fn dossier_connu(nom: &str) -> Option<PathBuf> {
+    let n = nom.trim().trim_end_matches(['/', '\\']).to_lowercase();
+    match n.as_str() {
+        "bureau" | "desktop" | "le bureau" => dirs::desktop_dir(),
+        "documents" | "document" | "mes documents" => dirs::document_dir(),
+        "téléchargements" | "telechargements" | "downloads" => dirs::download_dir(),
+        "images" | "pictures" | "photos" => dirs::picture_dir(),
+        "musique" | "music" => dirs::audio_dir(),
+        "vidéos" | "videos" => dirs::video_dir(),
+        _ => None,
+    }
+}
+/// Résout ce que la personne dit en chemin réel : « ~/x », « Bureau/x.txt », « x.txt » (cherché dans Bureau, Documents, Téléchargements,
+/// puis le dossier personnel). 06/09 : « Bureau/recette.txt » créait un dossier « Bureau » sous Windows au lieu d'aller sur le Desktop.
 fn resoudre(chemin: &str) -> PathBuf {
     let c = chemin.trim();
     if let Some(reste) = c.strip_prefix("~/") { return maison().join(reste); }
     if c == "~" { return maison(); }
     let p = PathBuf::from(c);
-    if p.is_absolute() { p } else { maison().join(p) }
+    if p.is_absolute() { return p; }
+    if let Some(d) = dossier_connu(c) { return d; }
+    let normal = c.replace('\\', "/");
+    if let Some((tete, reste)) = normal.split_once('/') {
+        if let Some(d) = dossier_connu(tete) { return d.join(reste); }
+        return maison().join(&normal);
+    }
+    // Un nom seul : là où il existe déjà, sinon sur le Bureau.
+    let candidats = [dirs::desktop_dir(), dirs::document_dir(), dirs::download_dir(), Some(maison())];
+    for d in candidats.iter().flatten() { let q = d.join(c); if q.exists() { return q; } }
+    dirs::desktop_dir().unwrap_or_else(maison).join(c)
 }
 
 /// Périmètre : le dossier personnel et les volumes/disques ; jamais le système.
@@ -34,10 +59,32 @@ fn normaliser(s: &str) -> String {
     s.chars().map(|c| match c { 'à' | 'â' | 'ä' => 'a', 'é' | 'è' | 'ê' | 'ë' => 'e', 'î' | 'ï' => 'i', 'ô' | 'ö' => 'o', 'ù' | 'û' | 'ü' => 'u', 'ç' => 'c', c => c.to_ascii_lowercase() }).collect()
 }
 
+/// Une commande système ne bloque jamais plus de 20 s (06/09 : « Ouvre Notes » sous Windows restait pendu 125 s).
 fn shell(cmd: &str, args: &[&str]) -> Result<String, String> {
-    let out = Command::new(cmd).args(args).output().map_err(|e| format!("{cmd} : {e}"))?;
-    if out.status.success() { Ok(String::from_utf8_lossy(&out.stdout).trim().to_string()) }
-    else { Err(format!("{cmd} : {}", String::from_utf8_lossy(&out.stderr).trim())) }
+    let mut enfant = Command::new(cmd).args(args).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().map_err(|e| format!("{cmd} : {e}"))?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut sortie = enfant.stdout.take(); let mut erreur = enfant.stderr.take();
+    std::thread::spawn(move || {
+        use std::io::Read;
+        let mut o = Vec::new(); let mut e = Vec::new();
+        if let Some(mut s) = sortie.take() { let _ = s.read_to_end(&mut o); }
+        if let Some(mut s) = erreur.take() { let _ = s.read_to_end(&mut e); }
+        let _ = tx.send((o, e));
+    });
+    let debut = std::time::Instant::now();
+    loop {
+        match enfant.try_wait() {
+            Ok(Some(statut)) => {
+                let (o, e) = rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap_or_default();
+                return if statut.success() { Ok(String::from_utf8_lossy(&o).trim().to_string()) } else { Err(format!("{cmd} : {}", String::from_utf8_lossy(&e).trim())) };
+            }
+            Ok(None) => {
+                if debut.elapsed() > std::time::Duration::from_secs(20) { let _ = enfant.kill(); return Err(format!("{cmd} : pas de réponse en 20 s, abandonné")); }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(e) => return Err(format!("{cmd} : {e}")),
+        }
+    }
 }
 #[cfg(target_os = "windows")]
 fn powershell(script: &str) -> Result<String, String> { shell("powershell", &["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script]) }

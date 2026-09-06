@@ -140,6 +140,7 @@ pub fn demarrer(app: AppHandle, etat: Arc<Mutex<Liaison>>) {
                         std::thread::spawn(move || {
                             let attendu = a2.get("attendu").and_then(|v| v.as_bool()).unwrap_or(false);
                             let (ok, resultat) = executer(&app2, &a2);
+                            crate::journaliser(&app2, &format!("action {}/{} {} → {} : {}", a2.get("genre").and_then(|v| v.as_str()).unwrap_or("?"), a2.get("action").and_then(|v| v.as_str()).unwrap_or("-"), a2.get("cible").and_then(|v| v.as_str()).unwrap_or(""), if ok { "ok" } else { "ÉCHEC" }, resultat.chars().take(100).collect::<String>().replace('\n', " ")));
                             let id = a2.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                             // Une capture d'écran : l'image part avec le résultat (réduite, JPEG), pour que le cerveau la regarde.
                             let image = if ok && a2.get("action").and_then(|v| v.as_str()) == Some("capture_ecran") { image_jointe(&resultat) } else { None };
