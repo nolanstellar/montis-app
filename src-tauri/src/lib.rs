@@ -185,6 +185,8 @@ fn poser_raccourci(app: &AppHandle, texte: &str) -> Result<(), String> {
                 let compacte = lire_reglages(&app2).compacte;
                 journaliser(&app2, "raccourci");
                 montrer_fenetre(&app2, compacte);
+                // Le raccourci est aussi le RÉVEIL de secours (démo, jour 5) : la page ouvre l'écoute sans attendre le mot d'éveil.
+                let _ = app2.emit("montis://ecoute", ());
             }
         })
         .map_err(|e| e.to_string())
