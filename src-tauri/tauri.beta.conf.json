@@ -3,7 +3,19 @@
   "identifier": "fr.agency-stellar.montis.beta",
   "plugins": {
     "updater": {
-      "endpoints": ["https://github.com/nolanstellar/montis-app/releases/download/beta/latest.json"]
+      "endpoints": [
+        "https://github.com/nolanstellar/montis-app/releases/download/beta/latest.json"
+      ]
     }
+  },
+  "bundle": {
+    "targets": [
+      "app",
+      "dmg",
+      "nsis",
+      "deb",
+      "appimage",
+      "rpm"
+    ]
   }
 }
