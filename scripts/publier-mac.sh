@@ -49,6 +49,13 @@ xcrun stapler staple "$DMG"
 # au seul moment où il compte. Les quatre copies passent maintenant par la même garde.
 copier() { [ "$1" -ef "$2" ] || cp "$1" "$2"; }
 copier "$DMG" "$B/dmg/${NOM}_${V}_universal.dmg"; copier "$DMG" "$B/dmg/${NOM}-Mac.dmg"; copier "$TAR" "$B/macos/${NOM}.app.tar.gz"; copier "$SIG" "$B/macos/${NOM}.app.tar.gz.sig"
+# LE TAG DÉCLENCHE LA CHAÎNE WINDOWS/LINUX — et rien ne le posait (07/09). Pour les bêtas il était poussé à la main, si
+# bien que le défaut ne s'est vu qu'en stable : le script attendait vingt minutes une publication que personne n'avait
+# demandée. Il le pose lui-même, à partir du commit courant, et ne fait rien s'il existe déjà.
+if ! git rev-parse "v$V" >/dev/null 2>&1; then
+  git tag -a "v$V" -m "Montis v$V" && echo "== tag v$V posé sur $(git rev-parse --short HEAD)"
+fi
+git push -q origin "v$V" 2>/dev/null || true
 echo "== attente de la publication GitHub v$V (chaîne Windows/Linux)"
 for i in $(seq 1 60); do gh release view "v$V" -R nolanstellar/montis-app >/dev/null 2>&1 && break; sleep 20; done
 gh release view "v$V" -R nolanstellar/montis-app >/dev/null 2>&1 || gh release create "v$V" -R nolanstellar/montis-app $([ $BETA = 1 ] && echo --prerelease) -t "Montis v$V" -n "Montis pour Mac (universel, signé et notarisé) : ${NOM}-Mac.dmg."
