@@ -550,7 +550,13 @@ pub fn texte_a_l_ecran(selection_seule: Option<bool>) -> Result<String, String> 
                 return Err("c'est ma propre fenêtre qui est au premier plan : clique dans ton document, puis redemande".into());
             }
         }
-        // 1. La sélection : on copie, on lit, on remet le presse-papiers comme il était — rien n'est perdu.
+        // 1. La sélection par le presse-papiers, en dernier recours. UNE IMAGE NE SE RESTAURE PAS : `pbpaste` ne rend que du
+        // texte, donc « remettre comme avant » écraserait une capture ou une photo que la personne venait de copier. Si le
+        // presse-papiers tient autre chose que du texte, on n'y touche pas du tout et on le dit.
+        let classes = osascript("return (clipboard info) as string").unwrap_or_default().to_lowercase();
+        if !classes.is_empty() && !classes.contains("utf8") && !classes.contains("string") && !classes.contains("«class ut16»") {
+            return Err("rien de sélectionné que je puisse lire, et ton presse-papiers contient autre chose que du texte : je n'y touche pas".into());
+        }
         let avant = shell("pbpaste", &[]).unwrap_or_default();
         let marqueur = format!("__montis_{}__", std::process::id());
         let _ = shell("bash", &["-lc", &format!("printf %s '{marqueur}' | pbcopy")]);
