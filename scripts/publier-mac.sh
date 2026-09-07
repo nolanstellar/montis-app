@@ -75,3 +75,12 @@ rm -rf "$T"
 # La copie de construction n'est pas une installation : on la retire, et Spotlight n'indexe plus ce dossier.
 rm -rf "$B"/macos/*.app "$B"/dmg/*.app; touch src-tauri/target/.metadata_never_index
 echo "PUBLIÉ : v$V ($NOM)"
+# APRÈS UNE PUBLICATION EN STABLE (point 23) : on pose le repère et on écrit la note — ce qui change, ce qu'il faut
+# vérifier en premier, et ce qui ne se prouve que sur un vrai poste. Écrite à partir des commits, jamais de mémoire.
+if [ $BETA = 0 ] && [ -d ../agent-stellar ]; then
+  NOTE=../agent-stellar/donnees/note-publication-$V.md
+  node --experimental-strip-types --no-warnings ../agent-stellar/scripts/note-publication.ts "" "$V" > "$NOTE" 2>/dev/null \
+    && echo "NOTE DE PUBLICATION : $NOTE" && cat "$NOTE"
+  git -C ../agent-stellar rev-parse HEAD > ../agent-stellar/donnees/PUBLIE-STABLE
+  echo "Repère posé : la prochaine note partira d'ici."
+fi
