@@ -346,6 +346,38 @@ pub fn mettre_en_veille(ecran_seulement: Option<bool>) -> Result<String, String>
 }
 
 /// Impression : fichier, copies, imprimante nommée (sinon celle par défaut). `file: "file"` ouvre la file d'impression.
+/// LA FENÊTRE ACTIVE : quelle application, quel titre, et le chemin du document ouvert quand l'application le donne (07/09).
+/// Sert à « imprime ce que j'ai à l'écran », « c'est quoi ce document », « ouvre le devis que je regarde » — sans épeler un nom de fichier.
+#[tauri::command]
+pub fn fenetre_active() -> Result<String, String> {
+    #[cfg(target_os = "macos")] {
+        let app = osascript("tell application \"System Events\" to get name of first process whose frontmost is true")?;
+        let app = app.trim().to_string();
+        if app.is_empty() { return Err("aucune fenêtre au premier plan".into()); }
+        let titre = osascript(&format!("tell application \"System Events\" to tell process \"{}\" to get name of front window", app.replace('"', ""))).unwrap_or_default();
+        // Le chemin du document, quand l'application expose son document (Aperçu, TextEdit, Pages, Word…).
+        let chemin = osascript(&format!("try\ntell application \"{}\" to get POSIX path of (get file of front document)\non error\ntry\ntell application \"{}\" to get POSIX path of (get path of front document)\non error\nreturn \"\"\nend try\nend try", app.replace('"', ""), app.replace('"', ""))).unwrap_or_default();
+        let chemin = chemin.trim();
+        return Ok(format!("{}|{}|{}", app, titre.trim(), chemin));
+    }
+    #[cfg(target_os = "windows")] {
+        let s = powershell(r#"Add-Type @"
+using System;using System.Text;using System.Runtime.InteropServices;
+public class W { [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+ [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr h, StringBuilder t, int n);
+ [DllImport("user32.dll")] public static extern int GetWindowThreadProcessId(IntPtr h, out uint p); }
+"@
+$h=[W]::GetForegroundWindow(); $b=New-Object System.Text.StringBuilder 512; [void][W]::GetWindowText($h,$b,512)
+$p=0; [void][W]::GetWindowThreadProcessId($h,[ref]$p)
+$n=(Get-Process -Id $p -ErrorAction SilentlyContinue).ProcessName
+"$n|" + $b.ToString() + "|""#)?;
+        let l = s.lines().last().unwrap_or("").trim().to_string();
+        if l.is_empty() { return Err("aucune fenêtre au premier plan".into()); }
+        return Ok(l);
+    }
+    #[allow(unreachable_code)] Err("non pris en charge".into())
+}
+
 /// Les imprimantes réellement configurées et laquelle est par défaut : de quoi répondre sans rien inventer (07/09).
 #[tauri::command]
 pub fn imprimantes() -> Result<String, String> {
@@ -373,6 +405,16 @@ pub fn imprimer(fichier: String, copies: Option<u32>, imprimante: Option<String>
         #[cfg(target_os = "windows")] shell("cmd", &["/c", "start", "", "ms-settings:printers"])?;
         return Ok("File d'impression ouverte.".into());
     }
+    // « imprime ce que j'ai à l'écran », « ce document », « ce PDF » : on part de la fenêtre active (07/09).
+    let fichier = if fichier.trim().is_empty() || fichier.trim().len() < 3 || ["ecran", "écran", "ce document", "ce pdf", "ce fichier", "cette page", "actuel", "ouvert"].iter().any(|x| fichier.trim().to_lowercase().contains(x)) {
+        let f = fenetre_active().unwrap_or_default();
+        let chemin = f.split('|').nth(2).unwrap_or("").trim().to_string();
+        if chemin.is_empty() {
+            let titre = f.split('|').nth(1).unwrap_or("").trim().to_string();
+            return Err(format!("je ne trouve pas de fichier derrière la fenêtre active{} : dis-moi lequel imprimer", if titre.is_empty() { String::new() } else { format!(" (« {titre} »)") }));
+        }
+        chemin
+    } else { fichier };
     let p = resoudre(&fichier);
     if !p.exists() { return Err(format!("« {fichier} » n'existe pas.")); }
     #[cfg(target_os = "macos")] {

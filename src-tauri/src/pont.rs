@@ -64,6 +64,7 @@ fn executer(app: &AppHandle, a: &Value) -> (bool, String) {
                 "imprimer" => { let copies = v.as_ref().and_then(|x| x.parse::<u32>().ok()); let imprimante = v.filter(|x| x.parse::<u32>().is_err()); poste::imprimer(c.unwrap_or_default(), copies, imprimante) }
                 "file_impression" => poste::imprimer("file".into(), None, None),
                 "imprimantes" => poste::imprimantes(),
+                "fenetre_active" => poste::fenetre_active(),
                 "luminosite_lire" => poste::lire_luminosite(),
                 "infos_systeme" => { let i = poste::infos_systeme(); Ok(format!("{} sur {}, processeur {}, {} Go de mémoire dont {} libres, {} Go de disque libres{}.", i.systeme, i.machine, i.processeur, i.memoire_totale_go, i.memoire_libre_go, i.disque_libre_go, i.batterie.map(|b| format!(", batterie {}", b.split(';').next().unwrap_or("").replace("-InternalBattery-0 (id=", "").split(')').last().unwrap_or("").trim())).unwrap_or_default())) }
                 "application_lancer" => poste::application("lancer".into(), c.unwrap_or_default(), v),
