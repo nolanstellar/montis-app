@@ -346,6 +346,19 @@ pub fn mettre_en_veille(ecran_seulement: Option<bool>) -> Result<String, String>
 }
 
 /// Impression : fichier, copies, imprimante nommée (sinon celle par défaut). `file: "file"` ouvre la file d'impression.
+/// « %20 » et compagnie : AXDocument rend une URL, pas un chemin.
+#[cfg(target_os = "macos")]
+fn percent_decode(s: &str) -> String {
+    let o = s.as_bytes(); let mut r = Vec::with_capacity(o.len()); let mut i = 0;
+    while i < o.len() {
+        if o[i] == b'%' && i + 2 < o.len() {
+            if let Ok(v) = u8::from_str_radix(std::str::from_utf8(&o[i + 1..i + 3]).unwrap_or("zz"), 16) { r.push(v); i += 3; continue; }
+        }
+        r.push(o[i]); i += 1;
+    }
+    String::from_utf8_lossy(&r).to_string()
+}
+
 /// LA FENÊTRE ACTIVE : quelle application, quel titre, et le chemin du document ouvert quand l'application le donne (07/09).
 /// Sert à « imprime ce que j'ai à l'écran », « c'est quoi ce document », « ouvre le devis que je regarde » — sans épeler un nom de fichier.
 #[tauri::command]
@@ -356,9 +369,13 @@ pub fn fenetre_active() -> Result<String, String> {
         if app.is_empty() { return Err("aucune fenêtre au premier plan".into()); }
         let titre = osascript(&format!("tell application \"System Events\" to tell process \"{}\" to get name of front window", app.replace('"', ""))).unwrap_or_default();
         // Le chemin du document, quand l'application expose son document (Aperçu, TextEdit, Pages, Word…).
-        let chemin = osascript(&format!("try\ntell application \"{}\" to get POSIX path of (get file of front document)\non error\ntry\ntell application \"{}\" to get POSIX path of (get path of front document)\non error\nreturn \"\"\nend try\nend try", app.replace('"', ""), app.replace('"', ""))).unwrap_or_default();
-        let chemin = chemin.trim();
-        return Ok(format!("{}|{}|{}", app, titre.trim(), chemin));
+        // Trois voies, de la plus précise à la plus universelle : le document scriptable, son chemin, puis l'attribut d'accessibilité
+        // AXDocument (qui marche pour toute application qui expose son document, dont Aperçu). Vérifié sur le Mac de Nolan le 07/09.
+        let a = app.replace('"', "");
+        let chemin = osascript(&format!("try\ntell application \"{a}\" to return POSIX path of (get file of front document)\nend try\ntry\ntell application \"{a}\" to return POSIX path of (get path of front document)\nend try\ntry\ntell application \"System Events\" to tell process \"{a}\" to return value of attribute \"AXDocument\" of front window\nend try\nreturn \"\"")).unwrap_or_default();
+        let chemin = chemin.trim().trim_start_matches("file://").to_string();
+        let chemin = percent_decode(&chemin);
+        return Ok(format!("{}|{}|{}", app, titre.trim(), chemin.trim()));
     }
     #[cfg(target_os = "windows")] {
         let s = powershell(r#"Add-Type @"
