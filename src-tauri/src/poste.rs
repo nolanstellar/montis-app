@@ -534,6 +534,22 @@ pub fn chercher_fichiers(requete: String, dossier: Option<String>, maximum: Opti
 #[tauri::command]
 pub fn texte_a_l_ecran(selection_seule: Option<bool>) -> Result<String, String> {
     #[cfg(target_os = "macos")] {
+        // 0. LA VOIE PROPRE : l'accessibilité rend le texte sélectionné SANS toucher au presse-papiers ni simuler de frappe.
+        // Beaucoup d'applications l'exposent (champs de saisie, TextEdit, Pages, la plupart des navigateurs).
+        if let Ok(v) = osascript("tell application \"System Events\"\n\tset p to first application process whose frontmost is true\n\tset e to value of attribute \"AXFocusedUIElement\" of p\n\treturn value of attribute \"AXSelectedText\" of e\nend tell") {
+            let v = v.trim().to_string();
+            if !v.is_empty() && v != "missing value" {
+                return Ok(format!("Sélection ({} caractères) :\n{}", v.chars().count(), v.chars().take(6000).collect::<String>()));
+            }
+        }
+        // 0 bis. LA FENÊTRE AU PREMIER PLAN EST MONTIS LUI-MÊME : simuler « copier » ne copierait rien de la personne.
+        // On le dit plutôt que de rendre un presse-papiers d'hier en le faisant passer pour sa sélection.
+        if let Ok(f) = fenetre_active() {
+            let appli = f.split('|').next().unwrap_or("").trim().to_lowercase();
+            if appli.contains("montis") && !selection_seule.unwrap_or(false) {
+                return Err("c'est ma propre fenêtre qui est au premier plan : clique dans ton document, puis redemande".into());
+            }
+        }
         // 1. La sélection : on copie, on lit, on remet le presse-papiers comme il était — rien n'est perdu.
         let avant = shell("pbpaste", &[]).unwrap_or_default();
         let marqueur = format!("__montis_{}__", std::process::id());
@@ -680,7 +696,10 @@ pub fn fenetre(action: String, application: Option<String>, x: Option<i32>, y: O
     }
     #[cfg(target_os = "windows")] {
         let sel = if app.trim().is_empty() { "$h = (Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow();' -Name fg -PassThru)::GetForegroundWindow()".to_string() } else { format!("$p = Get-Process | Where-Object {{ $_.MainWindowHandle -ne 0 -and ($_.ProcessName -like '*{0}*' -or $_.MainWindowTitle -like '*{0}*') }} | Select-Object -First 1; if (-not $p) {{ throw 'fenêtre introuvable' }}; $h = $p.MainWindowHandle", app.replace('\'', "''")) };
-        let def = "$u = Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int hh, bool r); [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr h, int c);' -Name win -PassThru; $sw = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea";
+        // L'ÉCRAN DE LA FENÊTRE, PAS L'ÉCRAN PRINCIPAL (07/09) : sur le poste de Nolan, qui en a deux, « fenêtre à droite »
+        // renvoyait la fenêtre sur le moniteur principal — vu comme un échec une passe sur trois. FromHandle donne l'écran
+        // où elle se trouve vraiment ; $h est défini juste avant par $sel.
+        let def = "$u = Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int hh, bool r); [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr h, int c);' -Name win -PassThru; $sw = [System.Windows.Forms.Screen]::FromHandle($h).WorkingArea";
         let corps = match action.as_str() {
             "deplacer" => format!("$u::MoveWindow($h, {}, {}, 1000, 700, $true)", x.unwrap_or(0), y.unwrap_or(0)),
             "redimensionner" => format!("$u::MoveWindow($h, 40, 40, {}, {}, $true)", largeur.unwrap_or(1000), hauteur.unwrap_or(700)),
