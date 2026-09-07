@@ -7,6 +7,15 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
 V=$(node -p "require('./package.json').version")
+# TROIS FICHIERS PORTENT LE NUMÉRO (package.json, tauri.conf.json, Cargo.toml) et ils peuvent diverger : le 07/09,
+# une bêta 8 a été publiée sous l'étiquette 7 parce que seul tauri.conf.json avait été relevé. On refuse de construire
+# tant qu'ils ne disent pas la même chose — une étiquette fausse est pire qu'une publication manquée.
+VC=$(node -p "require('./src-tauri/tauri.conf.json').version")
+VR=$(grep -m1 '^version = ' src-tauri/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+if [ "$V" != "$VC" ] || [ "$V" != "$VR" ]; then
+  echo "VERSIONS DIVERGENTES — package.json $V, tauri.conf.json $VC, Cargo.toml $VR. Alignez-les puis relancez." >&2
+  exit 1
+fi
 B=src-tauri/target/universal-apple-darwin/release/bundle
 BETA=0; case "$V" in *-beta*) BETA=1;; esac
 NOM=$([ $BETA = 1 ] && echo "Montis-Beta" || echo "Montis")
