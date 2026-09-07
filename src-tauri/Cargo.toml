@@ -1,6 +1,6 @@
 [package]
 name = "montis"
-version = "0.1.11-beta.4"
+version = "0.1.11-beta.5"
 description = "Montis — l'assistant Stellar sur le poste de travail"
 authors = ["Stellar Agency"]
 edition = "2021"
@@ -13,6 +13,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+libloading = "0.8"   # DisplayServices (luminosité de l'écran intégré sur Mac), chargée à l'exécution
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2"
 tauri-plugin-opener = "2"

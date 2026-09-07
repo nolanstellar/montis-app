@@ -233,18 +233,99 @@ pub fn regler_volume(valeur: String) -> Result<String, String> {
     #[allow(unreachable_code)] Err("volume non pris en charge sur ce système".into())
 }
 
+/// La luminosité actuelle de l'écran intégré (0 à 100), ou None si on ne sait pas la lire.
+#[cfg(target_os = "macos")]
+fn luminosite_actuelle_mac() -> Option<f32> {
+    unsafe {
+        let lib = libloading::Library::new("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices").ok()?;
+        let f: libloading::Symbol<unsafe extern "C" fn(u32, *mut f32) -> i32> = lib.get(b"DisplayServicesGetBrightness").ok()?;
+        let mut v: f32 = -1.0;
+        if f(CGMainDisplayID(), &mut v) == 0 && v >= 0.0 { Some(v * 100.0) } else { None }
+    }
+}
+#[cfg(target_os = "macos")]
+fn poser_luminosite_mac(niveau: f32) -> Result<(), ()> {
+    unsafe {
+        let lib = libloading::Library::new("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices").map_err(|_| ())?;
+        let f: libloading::Symbol<unsafe extern "C" fn(u32, f32) -> i32> = lib.get(b"DisplayServicesSetBrightness").map_err(|_| ())?;
+        if f(CGMainDisplayID(), niveau) == 0 { Ok(()) } else { Err(()) }
+    }
+}
+#[cfg(target_os = "macos")]
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" { fn CGMainDisplayID() -> u32; }
+
+/// « 50 », « 50 % », « +15 », « -15 », « monte », « baisse » → un niveau de 0 à 100. Le relatif a besoin du niveau actuel.
+fn niveau_demande(valeur: &str, actuel: Option<f32>) -> Result<f32, String> {
+    let v = valeur.trim().trim_end_matches('%').trim().to_lowercase();
+    let relatif = |pas: f32| -> Result<f32, String> { actuel.map(|a| (a + pas).clamp(0.0, 100.0)).ok_or_else(|| "je ne sais pas lire la luminosité actuelle de cet écran : donne-moi un pourcentage".to_string()) };
+    if v.starts_with('+') { return relatif(v[1..].trim().parse::<f32>().unwrap_or(15.0)); }
+    if v.starts_with('-') { return relatif(-v[1..].trim().parse::<f32>().unwrap_or(15.0)); }
+    if v.contains("monte") || v.contains("augmente") || v.contains("plus") { return relatif(15.0); }
+    if v.contains("baisse") || v.contains("diminue") || v.contains("moins") { return relatif(-15.0); }
+    if v.contains("max") { return Ok(100.0); }
+    if v.contains("min") { return Ok(0.0); }
+    v.parse::<f32>().map(|x| x.clamp(0.0, 100.0)).map_err(|_| "niveau attendu : un pourcentage (0 à 100), « +15 », « -15 », « monte » ou « baisse »".to_string())
+}
+
+/// Le niveau actuel, pour répondre « elle est à combien ? » sans inventer.
+#[tauri::command]
+pub fn lire_luminosite() -> Result<String, String> {
+    #[cfg(target_os = "macos")] {
+        if let Some(v) = luminosite_actuelle_mac() { return Ok(format!("Luminosité à {} %.", v.round() as u32)); }
+        for outil in ["m1ddc", "/opt/homebrew/bin/m1ddc", "/usr/local/bin/m1ddc"] {
+            if let Ok(s) = shell(outil, &["get", "luminance"]) { if let Some(n) = s.split_whitespace().last().and_then(|x| x.parse::<u32>().ok()) { return Ok(format!("Luminosité de l'écran externe à {n} %.")); } }
+        }
+        return Err("je ne sais pas lire la luminosité de cet écran (ni écran intégré, ni moniteur DDC/CI)".into());
+    }
+    #[cfg(target_os = "windows")] {
+        let s = powershell("(Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightness).CurrentBrightness")?;
+        let n = s.lines().find_map(|l| l.trim().parse::<u32>().ok()).ok_or("je ne sais pas lire la luminosité de cet écran")?;
+        return Ok(format!("Luminosité à {n} %."));
+    }
+    #[allow(unreachable_code)] Err("non pris en charge".into())
+}
+
 #[tauri::command]
 pub fn regler_luminosite(valeur: String) -> Result<String, String> {
     #[cfg(target_os = "windows")] {
-        let n: u32 = valeur.trim().parse().map_err(|_| "niveau attendu : 0 à 100")?;
-        powershell(&format!("(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1,{})", n.min(100)))
-            .map_err(|_| "cet écran ne permet pas le réglage logiciel de la luminosité (écrans externes)".to_string())?;
-        return Ok(format!("Luminosité à {} %.", n.min(100)));
+        let actuel = powershell("(Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightness).CurrentBrightness").ok()
+            .and_then(|s| s.lines().find_map(|l| l.trim().parse::<f32>().ok()));
+        let n = niveau_demande(&valeur, actuel)? as u32;
+        // Écran intégré : WMI. Si l'écran est externe, WMI refuse — on tente alors DDC/CI par l'API Windows (SetVCPFeature).
+        if powershell(&format!("(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1,{})", n.min(100))).is_ok() {
+            return Ok(format!("Luminosité à {} %.", n.min(100)));
+        }
+        let ddc = format!(r#"$s=@"
+using System;using System.Runtime.InteropServices;
+public class D {{
+ [DllImport("dxva2.dll")] public static extern bool SetMonitorBrightness(IntPtr h,uint v);
+ [DllImport("dxva2.dll")] public static extern bool GetNumberOfPhysicalMonitorsFromHMONITOR(IntPtr h,ref uint n);
+ [DllImport("dxva2.dll")] public static extern bool GetPhysicalMonitorsFromHMONITOR(IntPtr h,uint n,[Out] PM[] m);
+ [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)] public struct PM {{ public IntPtr h; [MarshalAs(UnmanagedType.ByValTStr,SizeConst=128)] public string d; }}
+ [DllImport("user32.dll")] public static extern IntPtr MonitorFromWindow(IntPtr h,uint f);
+}}
+"@
+Add-Type -TypeDefinition $s
+$m=[D]::MonitorFromWindow([IntPtr]::Zero,1); $n=0; [void][D]::GetNumberOfPhysicalMonitorsFromHMONITOR($m,[ref]$n)
+$a=New-Object 'D+PM[]' $n; [void][D]::GetPhysicalMonitorsFromHMONITOR($m,$n,$a)
+foreach ($p in $a) {{ [void][D]::SetMonitorBrightness($p.h,{}) }}"#, n.min(100));
+        powershell(&ddc).map_err(|_| "cet écran ne permet pas le réglage logiciel : ni WMI (écran intégré) ni DDC/CI (moniteur externe) n'ont répondu — c'est une limite du moniteur".to_string())?;
+        return Ok(format!("Luminosité de l'écran externe à {} %.", n.min(100)));
     }
     #[cfg(target_os = "macos")] {
-        let _ = valeur;
-        // macOS n'expose pas la luminosité sans outil tiers : on utilise les touches si la personne le veut, sinon on le dit.
-        return Err("sur Mac, la luminosité ne se règle pas par logiciel sans outil tiers : utilise les touches F1/F2 ou le Centre de contrôle".into());
+        // ÉCRAN INTÉGRÉ : DisplayServices, la bibliothèque privée d'Apple qu'utilise le Centre de contrôle. Chargée à l'exécution : si
+        // elle change de nom dans une version de macOS, on le voit et on le dit, on ne prétend rien (07/09).
+        let n: f32 = niveau_demande(&valeur, luminosite_actuelle_mac())?;
+        let cible = (n / 100.0).clamp(0.0, 1.0);
+        if let Ok(()) = poser_luminosite_mac(cible) { return Ok(format!("Luminosité à {} %.", n.round() as u32)); }
+        // ÉCRAN EXTERNE : DDC/CI, le protocole standard des moniteurs, par m1ddc s'il est installé.
+        for outil in ["m1ddc", "/opt/homebrew/bin/m1ddc", "/usr/local/bin/m1ddc"] {
+            if shell(outil, &["set", "luminance", &format!("{}", (cible * 100.0).round() as u32)]).is_ok() {
+                return Ok(format!("Luminosité de l'écran externe à {} %.", (cible * 100.0).round() as u32));
+            }
+        }
+        return Err("cet écran ne permet pas le réglage logiciel : l'écran intégré n'a pas répondu et aucun moniteur externe compatible DDC/CI n'a été trouvé".into());
     }
     #[allow(unreachable_code)] Err("non pris en charge".into())
 }
@@ -265,6 +346,25 @@ pub fn mettre_en_veille(ecran_seulement: Option<bool>) -> Result<String, String>
 }
 
 /// Impression : fichier, copies, imprimante nommée (sinon celle par défaut). `file: "file"` ouvre la file d'impression.
+/// Les imprimantes réellement configurées et laquelle est par défaut : de quoi répondre sans rien inventer (07/09).
+#[tauri::command]
+pub fn imprimantes() -> Result<String, String> {
+    #[cfg(target_os = "macos")] {
+        let liste = shell("lpstat", &["-p", "-d"])?;
+        let noms: Vec<String> = liste.lines().filter_map(|l| l.split_whitespace().nth(1).map(|s| s.to_string())).filter(|s| !s.contains(':')).collect();
+        let defaut = liste.lines().find(|l| l.contains("défaut") || l.contains("default")).and_then(|l| l.rsplit(&[':', ' '][..]).next()).unwrap_or("").trim().to_string();
+        if noms.is_empty() { return Ok("Aucune imprimante configurée sur ce poste.".into()); }
+        return Ok(format!("{} imprimante(s) : {}{}", noms.len(), noms.join(", "), if defaut.is_empty() { String::new() } else { format!(" — par défaut : {defaut}") }));
+    }
+    #[cfg(target_os = "windows")] {
+        let s = powershell("Get-Printer | ForEach-Object { $_.Name + $(if ($_.Name -eq (Get-CimInstance Win32_Printer | Where-Object Default -eq $true).Name) { ' (par défaut)' } else { '' }) }")?;
+        let noms: Vec<&str> = s.lines().filter(|l| !l.trim().is_empty()).collect();
+        if noms.is_empty() { return Ok("Aucune imprimante configurée sur ce poste.".into()); }
+        return Ok(format!("{} imprimante(s) : {}", noms.len(), noms.join(", ")));
+    }
+    #[allow(unreachable_code)] Err("non pris en charge sur ce système".into())
+}
+
 #[tauri::command]
 pub fn imprimer(fichier: String, copies: Option<u32>, imprimante: Option<String>) -> Result<String, String> {
     let n = copies.unwrap_or(1).clamp(1, 20);
@@ -276,11 +376,21 @@ pub fn imprimer(fichier: String, copies: Option<u32>, imprimante: Option<String>
     let p = resoudre(&fichier);
     if !p.exists() { return Err(format!("« {fichier} » n'existe pas.")); }
     #[cfg(target_os = "macos")] {
+        // Aucune imprimante configurée : on le dit, on ne prétend pas avoir imprimé (07/09).
+        let liste = shell("lpstat", &["-p", "-d"]).unwrap_or_default();
+        if !liste.contains("imprimante") && !liste.contains("printer") { return Err("aucune imprimante configurée sur ce Mac".into()); }
         let copies_s = format!("-#{n}");
         let mut args: Vec<&str> = vec![&copies_s];
         let imp; if let Some(i) = &imprimante { imp = i.clone(); args.push("-P"); args.push(&imp); }
         let chemin = p.to_string_lossy().to_string(); args.push(&chemin);
         shell("lpr", &args)?;
+        // Le nom RÉEL de l'imprimante qui a pris le travail, et l'état de la file : un retour vérifiable, pas « c'est fait ».
+        let nom = imprimante.clone().unwrap_or_else(|| shell("lpstat", &["-d"]).unwrap_or_default().rsplit(&[':', ' '][..]).next().unwrap_or("").trim().to_string());
+        let file = shell("lpstat", &["-o"]).unwrap_or_default();
+        let attente = file.lines().filter(|l| !l.trim().is_empty()).count();
+        return Ok(format!("Envoyé à {}{}{}.", if nom.is_empty() { "l'imprimante par défaut".into() } else { nom },
+            if n > 1 { format!(", {n} copies") } else { String::new() },
+            if attente > 1 { format!(" — {attente} travaux en attente dans la file") } else { String::new() }));
     }
     #[cfg(target_os = "windows")] {
         let chemin = p.display().to_string().replace('\'', "''");
