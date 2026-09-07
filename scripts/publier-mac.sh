@@ -43,7 +43,9 @@ codesign --force --sign "Developer ID Application: Nolan Viel (NK8ZTP3KWS)" --ti
 xcrun notarytool submit "$DMG" --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" --wait --timeout 30m | grep -E "status:" | tail -1
 xcrun stapler staple "$DMG"
 # Noms sans espace ni accent pour GitHub ; l'archive de mise à jour porte le nom du canal.
-cp "$DMG" "$B/dmg/${NOM}_${V}_universal.dmg"; cp "$DMG" "$B/dmg/${NOM}-Mac.dmg"; cp "$TAR" "$B/macos/${NOM}.app.tar.gz"; cp "$SIG" "$B/macos/${NOM}.app.tar.gz.sig"
+# En canal STABLE, $DMG s'appelle déjà Montis_<version>_universal.dmg : `cp` sur lui-même rend 1, et `set -e` arrêtait
+# la publication juste après la notarisation — construite, signée, notariée, et jamais mise en ligne (07/09).
+[ "$DMG" -ef "$B/dmg/${NOM}_${V}_universal.dmg" ] || cp "$DMG" "$B/dmg/${NOM}_${V}_universal.dmg"; cp "$DMG" "$B/dmg/${NOM}-Mac.dmg"; cp "$TAR" "$B/macos/${NOM}.app.tar.gz"; cp "$SIG" "$B/macos/${NOM}.app.tar.gz.sig"
 echo "== attente de la publication GitHub v$V (chaîne Windows/Linux)"
 for i in $(seq 1 60); do gh release view "v$V" -R nolanstellar/montis-app >/dev/null 2>&1 && break; sleep 20; done
 gh release view "v$V" -R nolanstellar/montis-app >/dev/null 2>&1 || gh release create "v$V" -R nolanstellar/montis-app $([ $BETA = 1 ] && echo --prerelease) -t "Montis v$V" -n "Montis pour Mac (universel, signé et notarisé) : ${NOM}-Mac.dmg."
