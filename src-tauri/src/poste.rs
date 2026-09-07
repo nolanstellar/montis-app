@@ -529,6 +529,44 @@ pub fn chercher_fichiers(requete: String, dossier: Option<String>, maximum: Opti
     Ok(trouves)
 }
 
+/// LIRE LE DOCUMENT OUVERT et COPIER LA SÉLECTION (07/09, point 9) : agir dans ce que la personne a sous les yeux.
+/// `selection` rend le texte sélectionné (par le presse-papiers, remis en état ensuite) ; sans sélection, le texte du document au premier plan.
+#[tauri::command]
+pub fn texte_a_l_ecran(selection_seule: Option<bool>) -> Result<String, String> {
+    #[cfg(target_os = "macos")] {
+        // 1. La sélection : on copie, on lit, on remet le presse-papiers comme il était — rien n'est perdu.
+        let avant = shell("pbpaste", &[]).unwrap_or_default();
+        let marqueur = format!("__montis_{}__", std::process::id());
+        let _ = shell("bash", &["-lc", &format!("printf %s '{marqueur}' | pbcopy")]);
+        let _ = osascript("tell application \"System Events\" to keystroke \"c\" using command down");
+        std::thread::sleep(std::time::Duration::from_millis(350));
+        let apres = shell("pbpaste", &[]).unwrap_or_default();
+        let selection = if apres.trim() != marqueur && !apres.trim().is_empty() { apres.trim().to_string() } else { String::new() };
+        // On rend le presse-papiers à la personne, quoi qu'il arrive.
+        let _ = std::process::Command::new("bash").arg("-lc").arg("pbcopy").stdin(std::process::Stdio::piped()).spawn()
+            .and_then(|mut p| { use std::io::Write; if let Some(mut e) = p.stdin.take() { let _ = e.write_all(avant.as_bytes()); } p.wait() });
+        if !selection.is_empty() { return Ok(format!("Sélection ({} caractères) :\n{}", selection.chars().count(), selection.chars().take(6000).collect::<String>())); }
+        if selection_seule.unwrap_or(false) { return Err("rien n'est sélectionné à l'écran".into()); }
+        // 2. Pas de sélection : le fichier du document au premier plan, lu depuis le disque.
+        let f = fenetre_active()?;
+        let chemin = f.split('|').nth(2).unwrap_or("").trim().to_string();
+        if chemin.is_empty() { return Err(format!("aucun texte sélectionné et aucun fichier derrière la fenêtre active ({})", f.split('|').nth(1).unwrap_or(""))); }
+        return lire_fichier(chemin, Some(6000));
+    }
+    #[cfg(target_os = "windows")] {
+        let avant = powershell("Get-Clipboard -Raw").unwrap_or_default();
+        powershell("Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('^c'); Start-Sleep -Milliseconds 350")?;
+        let apres = powershell("Get-Clipboard -Raw").unwrap_or_default();
+        let selection = if apres.trim() != avant.trim() && !apres.trim().is_empty() { apres.trim().to_string() } else { String::new() };
+        if !selection.is_empty() { return Ok(format!("Sélection ({} caractères) :\n{}", selection.chars().count(), selection.chars().take(6000).collect::<String>())); }
+        if selection_seule.unwrap_or(false) { return Err("rien n'est sélectionné à l'écran".into()); }
+        let f = fenetre_active()?;
+        let titre = f.split('|').nth(1).unwrap_or("").trim().to_string();
+        return Err(format!("aucun texte sélectionné ; la fenêtre active est « {titre} » — dis-moi quel fichier lire"));
+    }
+    #[allow(unreachable_code)] Err("non pris en charge".into())
+}
+
 /// LES FICHIERS RÉCEMMENT OUVERTS (07/09) : « le devis d'hier », « le document sur lequel j'étais » — sans nom exact ni recherche.
 #[tauri::command]
 pub fn fichiers_recents(maximum: Option<usize>) -> Result<Vec<String>, String> {

@@ -65,6 +65,8 @@ fn executer(app: &AppHandle, a: &Value) -> (bool, String) {
                 "file_impression" => poste::imprimer("file".into(), None, None),
                 "imprimantes" => poste::imprimantes(),
                 "fenetre_active" => poste::fenetre_active(),
+                "texte_ecran" => poste::texte_a_l_ecran(None),
+                "selection" => poste::texte_a_l_ecran(Some(true)),
                 "fichiers_recents" => poste::fichiers_recents(None).map(|l| l.join("\n")),
                 "luminosite_lire" => poste::lire_luminosite(),
                 "infos_systeme" => { let i = poste::infos_systeme(); Ok(format!("{} sur {}, processeur {}, {} Go de mémoire dont {} libres, {} Go de disque libres{}.", i.systeme, i.machine, i.processeur, i.memoire_totale_go, i.memoire_libre_go, i.disque_libre_go, i.batterie.map(|b| format!(", batterie {}", b.split(';').next().unwrap_or("").replace("-InternalBattery-0 (id=", "").split(')').last().unwrap_or("").trim())).unwrap_or_default())) }
