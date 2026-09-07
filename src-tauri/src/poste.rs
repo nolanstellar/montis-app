@@ -513,7 +513,45 @@ pub fn chercher_fichiers(requete: String, dossier: Option<String>, maximum: Opti
         }
         if trouves.len() >= max || debut.elapsed().as_secs() > 12 { break; }
     }
+    // RETROUVER SANS LE NOM EXACT (07/09) : si le nom ne donne rien, on cherche par le CONTENU et par le nom approché avec Spotlight
+    // (mdfind sur Mac), puis on classe du plus récemment ouvert au plus ancien — « le devis d'hier » se retrouve sans être épelé.
+    #[cfg(target_os = "macos")]
+    if trouves.is_empty() {
+        let requete_mdfind = mots.join(" ");
+        let ou = maison().display().to_string();
+        let filtre = format!("kMDItemTextContent == \"*{requete_mdfind}*\"c || kMDItemDisplayName == \"*{requete_mdfind}*\"c");
+        if let Ok(s) = shell("mdfind", &["-onlyin", ou.as_str(), filtre.as_str()]) {
+            for l in s.lines().take(max) { let c = l.trim().to_string(); if !c.is_empty() && !trouves.contains(&c) { trouves.push(c); } }
+        }
+    }
+    // Le plus récemment modifié d'abord : c'est presque toujours celui dont on parle.
+    trouves.sort_by_key(|c| std::cmp::Reverse(std::fs::metadata(c).and_then(|m| m.modified()).ok()));
     Ok(trouves)
+}
+
+/// LES FICHIERS RÉCEMMENT OUVERTS (07/09) : « le devis d'hier », « le document sur lequel j'étais » — sans nom exact ni recherche.
+#[tauri::command]
+pub fn fichiers_recents(maximum: Option<usize>) -> Result<Vec<String>, String> {
+    let max = maximum.unwrap_or(12).min(40);
+    #[cfg(target_os = "macos")] {
+        // Spotlight sait quand un document a été ouvert pour la dernière fois : c'est l'ordre le plus proche de ce que la personne a en tête.
+        let ou = maison().display().to_string();
+        let s = shell("mdfind", &["-onlyin", ou.as_str(), "kMDItemLastUsedDate >= $time.today(-7)"])?;
+        let mut l: Vec<String> = s.lines().map(|x| x.trim().to_string())
+            .filter(|c| !c.is_empty() && !c.contains("/Library/") && !c.contains("/.") && std::path::Path::new(c).is_file())
+            .collect();
+        l.sort_by_key(|c| std::cmp::Reverse(std::fs::metadata(c).and_then(|m| m.modified()).ok()));
+        l.truncate(max);
+        if l.is_empty() { return Err("aucun document ouvert récemment".into()); }
+        return Ok(l);
+    }
+    #[cfg(target_os = "windows")] {
+        let s = powershell("Get-ChildItem ([Environment]::GetFolderPath('Recent')) -Filter *.lnk | Sort-Object LastWriteTime -Descending | Select-Object -First 40 | ForEach-Object { $sh=New-Object -ComObject WScript.Shell; $sh.CreateShortcut($_.FullName).TargetPath }")?;
+        let l: Vec<String> = s.lines().map(|x| x.trim().to_string()).filter(|c| !c.is_empty() && std::path::Path::new(c).is_file()).take(max).collect();
+        if l.is_empty() { return Err("aucun document ouvert récemment".into()); }
+        return Ok(l);
+    }
+    #[allow(unreachable_code)] Err("non pris en charge".into())
 }
 
 #[tauri::command]
