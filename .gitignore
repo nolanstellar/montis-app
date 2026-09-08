@@ -3,3 +3,4 @@ src-tauri/target
 src-tauri/gen/schemas
 icone-source.png
 src-tauri/tauri.macos-local.conf.json
+scripts/.publier-fige.sh

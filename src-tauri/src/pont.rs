@@ -119,7 +119,14 @@ pub fn demarrer(app: AppHandle, etat: Arc<Mutex<Liaison>>) {
             let _ = poster(&l, "/api/appareil", json!({ "appareil": l.appareil, "plateforme": format!("app-{}", std::env::consts::OS), "version": env!("CARGO_PKG_VERSION"), "nom": format!("Montis {}", match std::env::consts::OS { "macos" => "Mac", "windows" => "Windows", o => o }) }));
             let c = client();
             // L'appareil dans l'adresse : le cœur ne diffuse à cette coque que ce qui concerne sa personne.
-            let mut req = c.get(format!("{}/api/flux?appareil={}", l.coeur.trim_end_matches('/'), l.appareil)).header("accept", "text/event-stream");
+            // DÉLAI DE LECTURE 90 s (08/09) : le cœur bat la chamade toutes les 30 s ; une connexion qui ne dit plus rien
+            // est un cœur redémarré (ou un tunnel mort) — mais le lecteur bloqué ne l'apprenait JAMAIS : la coque restait
+            // « connectée » à un flux vide pour toujours, toutes les actions expiraient jusqu'à ce qu'on la relance à la main
+            // (vu sur le PC de Nolan : abonnés [] au cœur, pont immobile depuis des minutes). Le délai dépassé, on reprend la
+            // boucle — immédiatement si la connexion avait vécu (elle était saine, c'est le cœur qui a bougé), avec le pas
+            // habituel si elle est morte jeune (cœur absent : on ne le martèle pas).
+            let connecte_a = std::time::Instant::now();
+            let mut req = c.get(format!("{}/api/flux?appareil={}", l.coeur.trim_end_matches('/'), l.appareil)).header("accept", "text/event-stream").timeout(Duration::from_secs(90));
             if let Some(ck) = entete_cookie(&l) { req = req.header("cookie", ck); }
             match req.send() {
                 Ok(resp) if resp.status().is_success() => {
@@ -158,7 +165,9 @@ pub fn demarrer(app: AppHandle, etat: Arc<Mutex<Liaison>>) {
                 Ok(resp) => { let m = format!("pont : flux refusé par le cœur ({}) — {}", resp.status(), if l.jeton.is_empty() { "il faut passer la porte dans la fenêtre Montis (mot de passe d'entreprise), le pont suivra" } else { "jeton refusé : repasser la porte" }); if m != dernier_message { crate::journaliser(&app, &m); dernier_message = m; } }
                 Err(e) => { let m = format!("pont : cœur injoignable : {e}"); if m != dernier_message { crate::journaliser(&app, &m); dernier_message = m; } }
             }
-            std::thread::sleep(Duration::from_secs(3));
+            // Connexion qui a vécu (≥ 60 s) : le délai de lecture l'a close alors que tout allait bien — on reprend tout de
+            // suite, pour que la fenêtre muente entre deux connexions reste un clin d'œil. Connexion morte jeune : le pas normal.
+            std::thread::sleep(if connecte_a.elapsed() >= Duration::from_secs(60) { Duration::from_millis(200) } else { Duration::from_secs(3) });
         }
     });
 }
