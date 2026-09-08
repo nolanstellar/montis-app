@@ -5,7 +5,7 @@
 
 use crate::poste;
 use serde_json::{json, Value};
-use std::io::{BufRead, BufReader};
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::AppHandle;
@@ -106,68 +106,86 @@ fn executer(app: &AppHandle, a: &Value) -> (bool, String) {
 }
 
 /// Le fil du pont : à relancer à chaque changement d'adresse ou de jeton (il relit l'état à chaque reconnexion).
+/// ASYNC ET DÉLAI PAR MORCEAU (08/09). Deux essais ont montré pourquoi ce fil est écrit ainsi :
+///   1. en bloquant, une connexion dont le cœur est mort ne rend JAMAIS la main — la coque restait « connectée »
+///      à un flux vide pour toujours, toutes les actions expiraient jusqu'à ce qu'on la relance à la main
+///      (vu sur le PC de Nolan : abonnés [] au cœur, pont immobile depuis des minutes) ;
+///   2. le délai total de reqwest bloquant (0.1.12) ne réveille pas une lecture suspendue : même symptôme.
+/// Ici, chaque morceau du flux est attendu sous `tokio::time::timeout` : 90 s de silence (le cœur bat la chamade
+/// toutes les 30 s) et la boucle reprend — reconnexion immédiate si la connexion avait vécu, pas normal sinon.
 pub fn demarrer(app: AppHandle, etat: Arc<Mutex<Liaison>>) {
-    std::thread::spawn(move || {
-        let mut generation_vue = String::new();
+    tauri::async_runtime::spawn(async move {
         let mut dernier_message = String::new();   // le même refus ne s'écrit qu'une fois dans le journal
         loop {
             let l = etat.lock().map(|g| g.clone()).unwrap_or_default();
-            if l.coeur.is_empty() || l.appareil.is_empty() { std::thread::sleep(Duration::from_secs(2)); continue; }
+            if l.coeur.is_empty() || l.appareil.is_empty() { tokio::time::sleep(Duration::from_secs(2)).await; continue; }
             let cle = format!("{}|{}|{}", l.coeur, l.appareil, l.jeton);
-            if cle != generation_vue { generation_vue = cle.clone(); }
             // Déclaration (plateforme, version) — le cœur sait qu'un poste natif est là.
-            let _ = poster(&l, "/api/appareil", json!({ "appareil": l.appareil, "plateforme": format!("app-{}", std::env::consts::OS), "version": env!("CARGO_PKG_VERSION"), "nom": format!("Montis {}", match std::env::consts::OS { "macos" => "Mac", "windows" => "Windows", o => o }) }));
-            let c = client();
+            let l0 = l.clone();
+            let declaration = json!({
+                "appareil": l0.appareil,
+                "plateforme": format!("app-{}", std::env::consts::OS),
+                "version": env!("CARGO_PKG_VERSION"),
+                "nom": format!("Montis {}", match std::env::consts::OS { "macos" => "Mac", "windows" => "Windows", o => o }),
+            });
+            let _ = tauri::async_runtime::spawn_blocking(move || poster(&l0, "/api/appareil", declaration)).await;
             // L'appareil dans l'adresse : le cœur ne diffuse à cette coque que ce qui concerne sa personne.
-            // DÉLAI DE LECTURE 90 s (08/09) : le cœur bat la chamade toutes les 30 s ; une connexion qui ne dit plus rien
-            // est un cœur redémarré (ou un tunnel mort) — mais le lecteur bloqué ne l'apprenait JAMAIS : la coque restait
-            // « connectée » à un flux vide pour toujours, toutes les actions expiraient jusqu'à ce qu'on la relance à la main
-            // (vu sur le PC de Nolan : abonnés [] au cœur, pont immobile depuis des minutes). Le délai dépassé, on reprend la
-            // boucle — immédiatement si la connexion avait vécu (elle était saine, c'est le cœur qui a bougé), avec le pas
-            // habituel si elle est morte jeune (cœur absent : on ne le martèle pas).
             let connecte_a = std::time::Instant::now();
-            let mut req = c.get(format!("{}/api/flux?appareil={}", l.coeur.trim_end_matches('/'), l.appareil)).header("accept", "text/event-stream").timeout(Duration::from_secs(90));
+                    let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(10)).user_agent(format!("Montis-coque/{}", env!("CARGO_PKG_VERSION"))).build().unwrap_or_default();
+            let mut req = client.get(format!("{}/api/flux?appareil={}", l.coeur.trim_end_matches('/'), l.appareil)).header("accept", "text/event-stream");
             if let Some(ck) = entete_cookie(&l) { req = req.header("cookie", ck); }
-            match req.send() {
+            match req.send().await {
                 Ok(resp) if resp.status().is_success() => {
                     crate::journaliser(&app, &format!("pont : connecté au flux du cœur ({}){}", l.coeur, if l.jeton.is_empty() { " sans jeton (local)" } else { " avec le jeton de la porte" })); dernier_message.clear();
-                    let lecteur = BufReader::new(resp);
-                    for ligne in lecteur.lines() {
-                        let Ok(ligne) = ligne else { crate::journaliser(&app, "pont : flux coupé, reconnexion"); break };
+                    let mut resp = resp;
+                    let mut tampon = String::new();
+                    loop {
                         // L'état a changé (autre cœur, autre jeton) : on recommence proprement.
                         if let Ok(g) = etat.lock() { if format!("{}|{}|{}", g.coeur, g.appareil, g.jeton) != cle { break; } }
-                        let Some(donnees) = ligne.strip_prefix("data: ") else { continue };
-                        let Ok(ev) = serde_json::from_str::<Value>(donnees) else { continue };
-                        // Une annonce spontanée du cœur (rappel, rendez-vous, conflit) : notification système, même fenêtre cachée.
-                        if ev.get("type").and_then(|t| t.as_str()) == Some("annonce") {
-                            if let Some(texte) = ev.get("texte").and_then(|t| t.as_str()) { let _ = poste::notifier(app.clone(), Some("Montis".into()), texte.to_string()); }
-                            continue;
+                        let morceau = tokio::time::timeout(Duration::from_secs(90), resp.chunk()).await;
+                        let octets = match morceau {
+                            Err(_) => { crate::journaliser(&app, "pont : flux muet 90 s — le cœur a redémarré ou le tunnel est mort, reprise"); break }
+                            Ok(Err(e)) => { crate::journaliser(&app, &format!("pont : flux coupé, reconnexion ({e})")); break }
+                            Ok(Ok(None)) => { crate::journaliser(&app, "pont : flux fermé par le cœur, reconnexion"); break }
+                            Ok(Ok(Some(b))) => b,
+                        };
+                        tampon.push_str(&String::from_utf8_lossy(&octets));
+                        while let Some(pos) = tampon.find('\n') {
+                            let ligne: String = tampon.drain(..=pos).collect();
+                            let Some(donnees) = ligne.trim_end().strip_prefix("data: ") else { continue };
+                            let Ok(ev) = serde_json::from_str::<Value>(donnees) else { continue };
+                            // Une annonce spontanée du cœur (rappel, rendez-vous, conflit) : notification système, même fenêtre cachée.
+                            if ev.get("type").and_then(|t| t.as_str()) == Some("annonce") {
+                                if let Some(texte) = ev.get("texte").and_then(|t| t.as_str()) { let _ = poste::notifier(app.clone(), Some("Montis".into()), texte.to_string()); }
+                                continue;
+                            }
+                            if ev.get("type").and_then(|t| t.as_str()) != Some("action") { continue; }
+                            let Some(a) = ev.get("action") else { continue };
+                            let pour = a.get("appareil").and_then(|v| v.as_str()).unwrap_or("");
+                            // Pour moi, ou pour personne en particulier (anticipation) : j'agis. Pour un autre appareil : non.
+                            if !pour.is_empty() && pour != l.appareil { continue; }
+                            // Chaque action dans son propre fil : une action longue (recherche, dialogue d'autorisation macOS) ne retarde pas les autres.
+                            let (app2, l2, a2) = (app.clone(), l.clone(), a.clone());
+                            std::thread::spawn(move || {
+                                let attendu = a2.get("attendu").and_then(|v| v.as_bool()).unwrap_or(false);
+                                let (ok, resultat) = executer(&app2, &a2);
+                                crate::journaliser(&app2, &format!("action {}/{} {} → {} : {}", a2.get("genre").and_then(|v| v.as_str()).unwrap_or("?"), a2.get("action").and_then(|v| v.as_str()).unwrap_or("-"), a2.get("cible").and_then(|v| v.as_str()).unwrap_or(""), if ok { "ok" } else { "ÉCHEC" }, resultat.chars().take(100).collect::<String>().replace('\n', " ")));
+                                let id = a2.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                // Une capture d'écran : l'image part avec le résultat (réduite, JPEG), pour que le cerveau la regarde.
+                                let image = if ok && a2.get("action").and_then(|v| v.as_str()) == Some("capture_ecran") { image_jointe(&resultat) } else { None };
+                                if attendu { let _ = poster(&l2, "/api/action-resultat", json!({ "id": id, "genre": a2.get("genre"), "ok": ok, "resultat": resultat, "image": image })); }
+                                else { let _ = poster(&l2, "/api/action-faite", json!({ "id": id, "genre": a2.get("genre"), "ok": ok, "detail": resultat, "appareil": l2.appareil })); }
+                            });
                         }
-                        if ev.get("type").and_then(|t| t.as_str()) != Some("action") { continue; }
-                        let Some(a) = ev.get("action") else { continue };
-                        let pour = a.get("appareil").and_then(|v| v.as_str()).unwrap_or("");
-                        // Pour moi, ou pour personne en particulier (anticipation) : j'agis. Pour un autre appareil : non.
-                        if !pour.is_empty() && pour != l.appareil { continue; }
-                        // Chaque action dans son propre fil : une action longue (recherche, dialogue d'autorisation macOS) ne retarde pas les autres.
-                        let (app2, l2, a2) = (app.clone(), l.clone(), a.clone());
-                        std::thread::spawn(move || {
-                            let attendu = a2.get("attendu").and_then(|v| v.as_bool()).unwrap_or(false);
-                            let (ok, resultat) = executer(&app2, &a2);
-                            crate::journaliser(&app2, &format!("action {}/{} {} → {} : {}", a2.get("genre").and_then(|v| v.as_str()).unwrap_or("?"), a2.get("action").and_then(|v| v.as_str()).unwrap_or("-"), a2.get("cible").and_then(|v| v.as_str()).unwrap_or(""), if ok { "ok" } else { "ÉCHEC" }, resultat.chars().take(100).collect::<String>().replace('\n', " ")));
-                            let id = a2.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                            // Une capture d'écran : l'image part avec le résultat (réduite, JPEG), pour que le cerveau la regarde.
-                            let image = if ok && a2.get("action").and_then(|v| v.as_str()) == Some("capture_ecran") { image_jointe(&resultat) } else { None };
-                            if attendu { let _ = poster(&l2, "/api/action-resultat", json!({ "id": id, "genre": a2.get("genre"), "ok": ok, "resultat": resultat, "image": image })); }
-                            else { let _ = poster(&l2, "/api/action-faite", json!({ "id": id, "genre": a2.get("genre"), "ok": ok, "detail": resultat, "appareil": l2.appareil })); }
-                        });
                     }
                 }
                 Ok(resp) => { let m = format!("pont : flux refusé par le cœur ({}) — {}", resp.status(), if l.jeton.is_empty() { "il faut passer la porte dans la fenêtre Montis (mot de passe d'entreprise), le pont suivra" } else { "jeton refusé : repasser la porte" }); if m != dernier_message { crate::journaliser(&app, &m); dernier_message = m; } }
                 Err(e) => { let m = format!("pont : cœur injoignable : {e}"); if m != dernier_message { crate::journaliser(&app, &m); dernier_message = m; } }
             }
             // Connexion qui a vécu (≥ 60 s) : le délai de lecture l'a close alors que tout allait bien — on reprend tout de
-            // suite, pour que la fenêtre muente entre deux connexions reste un clin d'œil. Connexion morte jeune : le pas normal.
-            std::thread::sleep(if connecte_a.elapsed() >= Duration::from_secs(60) { Duration::from_millis(200) } else { Duration::from_secs(3) });
+            // suite, pour que la fenêtre muette entre deux connexions reste un clin d'œil. Connexion morte jeune : le pas normal.
+            if connecte_a.elapsed() >= Duration::from_secs(60) { tokio::time::sleep(Duration::from_millis(200)).await; }
+            else { tokio::time::sleep(Duration::from_secs(3)).await; }
         }
     });
 }
