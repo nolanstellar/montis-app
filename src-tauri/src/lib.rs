@@ -258,10 +258,14 @@ pub fn run() {
                 Ok(_) => journaliser(&handle, &format!("fenêtre créée sur {url}")),
                 Err(e) => { journaliser(&handle, &format!("ERREUR création de la fenêtre : {e}")); return Err(e.into()); }
             }
-            // Fermer la fenêtre = fermer Montis (règle : l'interface est toujours visible tant que l'application tourne).
+            // FERMER LA FENÊTRE RÉDUIT DANS LA BARRE, L'APPLICATION RESTE (08/09). La règle d'origine — fenêtre fermée =
+            // application quittée — tuait le PONT avec la fenêtre : au redémarrage du cœur, la page (503 du relais pendant
+            // la relance) fermait la fenêtre d'elle-même, et avec elle les yeux du poste — le PC de Nolan perdait toutes
+            // ses actions jusqu'à relance manuelle. Quitter passe par le menu de l'icône (« Quitter Montis ») ; rouvrir,
+            // par la même icône ou le Dock.
             if let Some(w) = app.get_webview_window("main") {
                 let h3 = handle.clone();
-                w.on_window_event(move |e| { if let tauri::WindowEvent::CloseRequested { .. } = e { journaliser(&h3, "fenêtre fermée → Montis se ferme"); h3.exit(0); } });
+                w.on_window_event(move |e| { if let tauri::WindowEvent::CloseRequested { api, .. } = e { api.prevent_close(); journaliser(&h3, "fenêtre fermée → réduite dans la barre (le pont reste)"); if let Some(f) = h3.get_webview_window("main") { let _ = f.hide(); } } });
             }
             // MISE À JOUR AUTOMATIQUE : au démarrage puis toutes les six heures ; téléchargée, installée, redémarrage.
             { let h4 = handle.clone(); tauri::async_runtime::spawn(async move { loop {
