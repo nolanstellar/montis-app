@@ -267,11 +267,15 @@ pub fn run() {
                 let h3 = handle.clone();
                 w.on_window_event(move |e| { if let tauri::WindowEvent::CloseRequested { api, .. } = e { api.prevent_close(); journaliser(&h3, "fenêtre fermée → réduite dans la barre (le pont reste)"); if let Some(f) = h3.get_webview_window("main") { let _ = f.hide(); } } });
             }
-            // MISE À JOUR AUTOMATIQUE : au démarrage puis toutes les six heures ; téléchargée, installée, redémarrage.
+            // MISE À JOUR AUTOMATIQUE : au démarrage puis toutes les QUINZE MINUTES (08/09 ; six heures avant) ; téléchargée,
+            // installée, redémarrage. La page de l'interface, elle, se recharge seule quand le cœur la change (PAGE_VERSION) ;
+            // l'application ne redémarre qu'à une mise à jour d'elle-même — quinze minutes, c'est le délai au bout duquel
+            // une correction publiée est DANS les mains de toute la flotte, sans que personne ne touche à rien. La vérification
+            // est une requête légère (latest.json) : quinze minutes ne coûte rien.
             { let h4 = handle.clone(); tauri::async_runtime::spawn(async move { loop {
                 tokio::time::sleep(std::time::Duration::from_secs(20)).await;
                 verifier_mise_a_jour(&h4).await;
-                tokio::time::sleep(std::time::Duration::from_secs(6 * 3600)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(15 * 60)).await;
             } }); }
             // Barre des menus / zone de notification.
             let ouvrir = MenuItem::with_id(app, "ouvrir", "Ouvrir Montis", true, None::<&str>)?;
