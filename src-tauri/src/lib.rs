@@ -218,6 +218,74 @@ async fn verifier_mise_a_jour(app: &AppHandle) {
     }
 }
 
+/// UNE SEULE ETOILE DANS LA BARRE (08/09). Depuis la 0.1.14 (fermer la fenetre garde l'application vivante), le greffon
+/// single-instance n'intercepte plus rien : un second lancement posait une seconde icone, et Nolan voyait deux etoiles.
+/// On tient le compte nous-memes, avec un verrou nomme qui porte le pid ET la version :
+///   - meme version, instance vivante : la doyenne garde la main, on lui demande de montrer sa fenetre, et on s'efface ;
+///   - version differente (une mise a jour a ete installee dans le dos) : la neuve prend la place de l'ancienne ;
+///   - instance qui ne repond pas en trois secondes : elle est figee, on la remplace — jamais d'application qui refuse
+///     de demarrer parce qu'un fantome tient le verrou.
+fn fichier_verrou(app: &AppHandle) -> std::path::PathBuf {
+    let d = app.path().app_config_dir().unwrap_or_else(|_| std::env::temp_dir());
+    let _ = std::fs::create_dir_all(&d);
+    d.join("instance.verrou")
+}
+fn fichier_appel(app: &AppHandle) -> std::path::PathBuf {
+    app.path().app_config_dir().unwrap_or_else(|_| std::env::temp_dir()).join("montre-toi")
+}
+/// Le pid est-il encore un Montis ? (un pid recycle par un autre programme ne doit pas nous faire ceder la place)
+fn montis_vivant(pid: u32) -> bool {
+    #[cfg(windows)]
+    let sortie = std::process::Command::new("tasklist").args(["/FI", &format!("PID eq {pid}"), "/NH"]).output();
+    #[cfg(not(windows))]
+    let sortie = std::process::Command::new("ps").args(["-p", &pid.to_string(), "-o", "command="]).output();
+    sortie.map(|o| String::from_utf8_lossy(&o.stdout).to_lowercase().contains("montis")).unwrap_or(false)
+}
+fn terminer_instance(pid: u32) {
+    #[cfg(windows)]
+    let _ = std::process::Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).status();
+    // On demande d'abord poliment (l'instance range ses affaires), puis on tranche : une instance figee ne repond pas
+    // a un TERM, et personne ne doit rester avec deux etoiles parce qu'un fantome refuse de mourir.
+    #[cfg(not(windows))]
+    {
+        let _ = std::process::Command::new("kill").arg(pid.to_string()).status();
+        for _ in 0..8 {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            if !montis_vivant(pid) { return; }
+        }
+        let _ = std::process::Command::new("kill").args(["-9", &pid.to_string()]).status();
+    }
+}
+fn ecrire_verrou(app: &AppHandle) {
+    let _ = std::fs::write(fichier_verrou(app), format!("{} {}", std::process::id(), env!("CARGO_PKG_VERSION")));
+}
+/// Vrai quand ce processus doit disparaitre sans rien poser : une autre instance a la main.
+fn doit_s_effacer(app: &AppHandle) -> bool {
+    let nous = std::process::id();
+    let contenu = std::fs::read_to_string(fichier_verrou(app)).unwrap_or_default();
+    let mut mots = contenu.split_whitespace();
+    let pid = mots.next().and_then(|x| x.parse::<u32>().ok()).unwrap_or(0);
+    let version = mots.next().unwrap_or("").to_string();
+    if pid == 0 || pid == nous || !montis_vivant(pid) { ecrire_verrou(app); return false; }
+    if version == env!("CARGO_PKG_VERSION") {
+        let appel = fichier_appel(app);
+        let _ = std::fs::write(&appel, nous.to_string());
+        journaliser(app, &format!("Montis tourne deja (pid {pid}, v{version}) : on lui demande de se montrer et on s'efface"));
+        for _ in 0..15 {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            if !appel.exists() { return true; }
+        }
+        journaliser(app, &format!("l'instance {pid} ne repond pas : on la remplace"));
+        let _ = std::fs::remove_file(&appel);
+    } else {
+        journaliser(app, &format!("instance en v{version} (pid {pid}) : elle laisse la place a la v{}", env!("CARGO_PKG_VERSION")));
+    }
+    terminer_instance(pid);
+    std::thread::sleep(std::time::Duration::from_millis(800));
+    ecrire_verrou(app);
+    false
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| { journaliser(app, "seconde instance → on montre la fenêtre"); montrer_fenetre(app, false); }))
@@ -244,6 +312,7 @@ pub fn run() {
             let premier_lancement = !fichier_reglages(&handle).exists();
             let r = lire_reglages(&handle);
             journaliser(&handle, &format!("démarrage v{} · {} · cœur {} · raccourci {} · appareil {}{}", env!("CARGO_PKG_VERSION"), std::env::consts::OS, r.adresse_coeur, r.raccourci, r.appareil, if premier_lancement { " · PREMIER LANCEMENT" } else { "" }));
+            if doit_s_effacer(&handle) { std::process::exit(0); }
             *app.state::<Etat>().0.lock().unwrap() = r.clone();
             // Le pont natif : abonné au flux du cœur, il exécute les actions même fenêtre cachée.
             { let p = app.state::<pont::EtatPont>().0.clone(); if let Ok(mut l) = p.lock() { l.coeur = r.adresse_coeur.clone(); l.appareil = r.appareil.clone(); l.jeton = r.jeton.clone(); } pont::demarrer(handle.clone(), p); }
@@ -267,6 +336,12 @@ pub fn run() {
                 let h3 = handle.clone();
                 w.on_window_event(move |e| { if let tauri::WindowEvent::CloseRequested { api, .. } = e { api.prevent_close(); journaliser(&h3, "fenêtre fermée → réduite dans la barre (le pont reste)"); if let Some(f) = h3.get_webview_window("main") { let _ = f.hide(); } } });
             }
+            // Un second lancement nous appelle plutot que de poser sa propre icone : on montre la fenetre pour lui.
+            { let h6 = handle.clone(); let appel = fichier_appel(&handle); let _ = std::fs::remove_file(&appel);
+              tauri::async_runtime::spawn(async move { loop {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                if appel.exists() { let _ = std::fs::remove_file(&appel); journaliser(&h6, "un second lancement nous appelle : fenetre montree"); montrer_fenetre(&h6, false); }
+              } }); }
             // MISE À JOUR AUTOMATIQUE : au démarrage puis toutes les QUINZE MINUTES (08/09 ; six heures avant) ; téléchargée,
             // installée, redémarrage. La page de l'interface, elle, se recharge seule quand le cœur la change (PAGE_VERSION) ;
             // l'application ne redémarre qu'à une mise à jour d'elle-même — quinze minutes, c'est le délai au bout duquel
@@ -300,7 +375,7 @@ pub fn run() {
                     "compacte" => montrer_fenetre(app, true),
                     "reglages" => { montrer_fenetre(app, false); let _ = app.emit("montis://reglages", ()); }
                     "maj" => { let h5 = app.clone(); tauri::async_runtime::spawn(async move { verifier_mise_a_jour(&h5).await; }); montrer_fenetre(app, false); }
-                    "quitter" => app.exit(0),
+                    "quitter" => { let _ = std::fs::remove_file(fichier_verrou(app)); app.exit(0) }
                     _ => {}
                 })
                 .on_tray_icon_event(move |_tray, ev| {
