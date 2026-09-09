@@ -362,6 +362,11 @@ pub fn run() {
             let quitter = MenuItem::with_id(app, "quitter", "Quitter Montis", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&ouvrir, &compacte, &PredefinedMenuItem::separator(app)?, &reglages_item, &autorisations_item, &journal_item, &maj, &PredefinedMenuItem::separator(app)?, &quitter])?;
             let h = handle.clone();
+            // DEUX ETOILES DANS LA BARRE (09/09) : l'icone etait declaree DEUX FOIS — une fois dans tauri.conf.json
+            // (Tauri la pose seul au demarrage, sans menu) et une fois ici, la seule a porter le menu. La declaration
+            // de la configuration est retiree ; ce garde reste, pour qu'une icone posee par la configuration ne puisse
+            // plus jamais s'ajouter a la notre en silence.
+            if app.remove_tray_by_id("montis").is_some() { journaliser(&handle, "une icone etait deja posee par la configuration : retiree, il n'en reste qu'une"); }
             TrayIconBuilder::with_id("montis")
                 .icon(app.default_window_icon().unwrap().clone())
                 .icon_as_template(true)
